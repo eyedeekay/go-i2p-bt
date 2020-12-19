@@ -49,7 +49,7 @@ func (pm *testPeerManager) AddPeer(infohash metainfo.Hash, addr metainfo.Address
 }
 
 func (pm *testPeerManager) GetPeers(infohash metainfo.Hash, maxnum int,
-	ipv6 bool) (addrs []metainfo.Address) {
+	ipv6, i2p bool) (addrs []metainfo.Address) {
 	// We only supports IPv4, so ignore the ipv6 argument.
 	pm.lock.RLock()
 	_addrs := pm.peers[infohash]
@@ -63,12 +63,12 @@ func (pm *testPeerManager) GetPeers(infohash metainfo.Hash, maxnum int,
 	return
 }
 
-func onSearch(infohash string, ip net.IP, port uint16) {
+func onSearch(infohash string, ip net.Addr, port uint16) {
 	addr := net.JoinHostPort(ip.String(), strconv.FormatUint(uint64(port), 10))
 	fmt.Printf("%s is searching %s\n", addr, infohash)
 }
 
-func onTorrent(infohash string, ip net.IP, port uint16) {
+func onTorrent(infohash string, ip net.Addr, port uint16) {
 	addr := net.JoinHostPort(ip.String(), strconv.FormatUint(uint64(port), 10))
 	fmt.Printf("%s has downloaded %s\n", addr, infohash)
 }
@@ -149,7 +149,7 @@ func ExampleServer() {
 	time.Sleep(time.Second * 2)
 
 	// Add the peer to let the DHT server1 has the peer.
-	pm.AddPeer(infohash, metainfo.NewAddress(net.ParseIP("127.0.0.1"), 9001))
+	pm.AddPeer(infohash, metainfo.NewAddress(&net.IPAddr{IP:net.ParseIP("127.0.0.1")}, 9001))
 
 	// Search the torrent infohash again, but from DHT server2,
 	// which will search the DHT server1 recursively.

@@ -45,7 +45,7 @@ var errUnsupportedIPProtocol = fmt.Errorf("unsupported ip protocol")
 const (
 	IPv4Protocol IPProtocolStack = 4
 	IPv6Protocol IPProtocolStack = 6
-	I2PProtocol  IPProtocolStack = 4
+	I2PProtocol  IPProtocolStack = 2
 )
 
 // IPProtocolStack represents the ip protocol stack, such as IPv4 or IPv6

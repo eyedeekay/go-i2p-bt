@@ -154,10 +154,10 @@ func (r AnnounceResponse) EncodeTo(buf *bytes.Buffer) {
 	binary.Write(buf, binary.BigEndian, r.Leechers)
 	binary.Write(buf, binary.BigEndian, r.Seeders)
 	for _, addr := range r.Addresses {
-		if ip := To4(addr.IP); ip != nil {
+		if ip := To4(addr.Addr); ip != nil {
 			buf.Write(ip[:])
 		} else {
-			buf.Write(To16(addr.IP)[:])
+			buf.Write(To16(addr.Addr)[:])
 		}
 		binary.Write(buf, binary.BigEndian, addr.Port)
 	}
@@ -182,7 +182,7 @@ func (r *AnnounceResponse) DecodeFrom(b []byte, ipv4 bool) {
 		ip := make(net.IP, iplen)
 		copy(ip, b[i-step:i-2])
 		port := binary.BigEndian.Uint16(b[i-2 : i])
-		r.Addresses = append(r.Addresses, metainfo.Address{IP: &net.IPAddr{IP: ip}, Port: port})
+		r.Addresses = append(r.Addresses, metainfo.Address{Addr: &net.IPAddr{IP: ip}, Port: port})
 	}
 }
 

@@ -355,7 +355,7 @@ func (cn CompactIPv4Node) MarshalBinary() ([]byte, error) {
 	buf := bytes.NewBuffer(nil)
 	buf.Grow(26 * len(cn))
 	for _, ni := range cn {
-		if ni.Addr.IP = ni.Addr.IP; len(To4(ni.Addr.IP)) == 0 {
+		if len(To4(ni.Addr.Addr)) == 0 {
 			continue
 		}
 		if n, err := ni.WriteBinary(buf); err != nil {
@@ -414,7 +414,7 @@ func (cn CompactIPv6Node) MarshalBinary() ([]byte, error) {
 	buf := bytes.NewBuffer(nil)
 	buf.Grow(38 * len(cn))
 	for _, ni := range cn {
-		ni.Addr.IP = ni.Addr.IP
+		//ni.Addr.Addr = ni.Addr.Addr
 		if n, err := ni.WriteBinary(buf); err != nil {
 			return nil, err
 		} else if n != 38 {
@@ -469,7 +469,7 @@ func (cn CompactI2PNode) MarshalBinary() ([]byte, error) {
 	buf := bytes.NewBuffer(nil)
 	buf.Grow(54 * len(cn))
 	for _, ni := range cn {
-		ni.Addr.IP = ni.Addr.IP
+		//ni.Addr.IP = ni.Addr.IP
 		if n, err := ni.WriteBinary(buf); err != nil {
 			return nil, err
 		} else if n != 54 {
