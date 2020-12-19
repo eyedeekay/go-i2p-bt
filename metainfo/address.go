@@ -214,7 +214,7 @@ func (a *Address) UnmarshalBinary(b []byte) (err error) {
 	switch _len {
 	case net.IPv4len, net.IPv6len:
 	default:
-	  log.Println("UNMARSHAL", _len)
+		log.Println("UNMARSHAL", _len)
 		return ErrInvalidAddr
 	}
 
