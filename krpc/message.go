@@ -281,7 +281,7 @@ type ResponseResult struct {
 	// find_node
 	Nodes6 CompactIPv6Node `bencode:"nodes6,omitempty"` // BEP 32
 
-	NodesI2P CompactI2PNode `bencode:nodes,omitempty`
+//	NodesI2P CompactI2PNode `bencode:nodes,omitempty`
 
 	// Token is used for future "announce_peer".
 	//

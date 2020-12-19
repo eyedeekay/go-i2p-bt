@@ -515,7 +515,7 @@ func (s *Server) handleQuery(raddr net.Addr, m krpc.Message) {
 				r.Nodes6 = s.routingTable6.Closest(m.A.InfoHash, s.conf.K)
 			}
 			if ni {
-				r.NodesI2P = s.routingTableI2P.Closest(m.A.InfoHash, s.conf.K)
+				r.Nodes = s.routingTableI2P.Closest(m.A.InfoHash, s.conf.K)
 			}
 		}
 		s.reply(raddr, m.T, r)

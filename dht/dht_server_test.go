@@ -149,7 +149,7 @@ func ExampleServer() {
 	time.Sleep(time.Second * 2)
 
 	// Add the peer to let the DHT server1 has the peer.
-	pm.AddPeer(infohash, metainfo.NewAddress(&net.IPAddr{IP:net.ParseIP("127.0.0.1")}, 9001))
+	pm.AddPeer(infohash, metainfo.NewAddress(&net.IPAddr{IP: net.ParseIP("127.0.0.1")}, 9001))
 
 	// Search the torrent infohash again, but from DHT server2,
 	// which will search the DHT server1 recursively.

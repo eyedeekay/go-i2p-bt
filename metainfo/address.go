@@ -19,6 +19,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"strconv"
 
@@ -32,7 +33,7 @@ var ErrInvalidAddr = fmt.Errorf("invalid compact information of ip and port")
 // Address represents a client/server listening on a UDP port implementing
 // the DHT protocol.
 type Address struct {
-	Addr   net.Addr // For IPv4, its length must be 4.
+	Addr net.Addr // For IPv4, its length must be 4.
 	Port uint16
 }
 
@@ -170,9 +171,9 @@ func (a Address) UDPAddr() *net.UDPAddr {
 
 func (a Address) String() string {
 	if a.Addr == nil {
-	  if a.Port == 0 {
-		  return net.JoinHostPort("127.0.0.1", strconv.FormatUint(uint64(0), 10))
-	  }
+		if a.Port == 0 {
+			return net.JoinHostPort("127.0.0.1", strconv.FormatUint(uint64(0), 10))
+		}
 		return net.JoinHostPort("127.0.0.1", strconv.FormatUint(uint64(a.Port), 10))
 	}
 	host, _ := SplitHostPort(a.Addr)
@@ -185,10 +186,10 @@ func (a Address) String() string {
 // Equal reports whether n is equal to o, which is equal to
 //   n.HasIPAndPort(o.IP, o.Port)
 func (a Address) Equal(o Address) bool {
-  if a.String() == o.String(){
-    return a.Port == o.Port
-  }
-  return false
+	if a.String() == o.String() {
+		return a.Port == o.Port
+	}
+	return false
 }
 
 // HasIPAndPort reports whether the current node has the ip and the port.
@@ -213,6 +214,7 @@ func (a *Address) UnmarshalBinary(b []byte) (err error) {
 	switch _len {
 	case net.IPv4len, net.IPv6len:
 	default:
+	  log.Println("UNMARSHAL", _len)
 		return ErrInvalidAddr
 	}
 
@@ -240,7 +242,7 @@ func (a *Address) decode(vs []interface{}) (err error) {
 		}
 	}()
 
-	host := vs[0].(string)
+	host, _, _ := net.SplitHostPort(vs[0].(string))
 	ip := net.ParseIP(host)
 	if len(ip) == 0 {
 		return ErrInvalidAddr
