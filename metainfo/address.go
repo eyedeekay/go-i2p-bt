@@ -22,6 +22,7 @@ import (
 	"net"
 	"strconv"
 
+	"github.com/eyedeekay/sam3/i2pkeys"
 	"github.com/xgfone/bt/bencode"
 )
 
@@ -31,16 +32,49 @@ var ErrInvalidAddr = fmt.Errorf("invalid compact information of ip and port")
 // Address represents a client/server listening on a UDP port implementing
 // the DHT protocol.
 type Address struct {
-	IP   net.IP // For IPv4, its length must be 4.
+	IP   net.Addr // For IPv4, its length must be 4.
 	Port uint16
 }
 
+func EmtpyAddress() Address {
+	var a Address
+	a.IP = &net.IPAddr{
+		IP: net.ParseIP("127.0.0.1"),
+	}
+	a.Port = 0
+	return a
+}
+
+func To4(addr net.Addr) net.IP {
+	rawip := net.ParseIP(addr.String())
+	if rawip == nil {
+		return nil
+	}
+	return rawip.To4()
+}
+
+func To16(addr net.Addr) net.IP {
+	rawip := net.ParseIP(addr.String())
+	if rawip == nil {
+		return nil
+	}
+	return rawip.To16()
+}
+
+func ToIP(addr net.Addr) net.IP {
+	return net.ParseIP(addr.String())
+}
+
 // NewAddress returns a new Address.
-func NewAddress(ip net.IP, port uint16) Address {
-	if ipv4 := ip.To4(); len(ipv4) > 0 {
-		ip = ipv4
+func NewAddress(ip net.Addr, port uint16) Address {
+	if ipv4 := To4(ip); len(ipv4) > 0 {
+		return Address{IP: ip, Port: port}
 	}
 	return Address{IP: ip, Port: port}
+}
+
+func (a Address) Network() string {
+	return a.IP.Network()
 }
 
 // NewAddressFromString returns a new Address by the address string.
@@ -72,7 +106,7 @@ func NewAddressesFromString(s string) (addrs []Address, err error) {
 
 	addrs = make([]Address, len(ips))
 	for i, ip := range ips {
-		addrs[i] = Address{IP: ip, Port: port}
+		addrs[i] = Address{IP: &net.IPAddr{IP: ip}, Port: port}
 	}
 
 	return
@@ -100,9 +134,9 @@ func (a *Address) FromString(addr string) (err error) {
 		return fmt.Errorf("the domain '%s' has no ips", host)
 	}
 
-	a.IP = ips[0]
-	if ip := a.IP.To4(); len(ip) > 0 {
-		a.IP = ip
+	a.IP = &net.IPAddr{IP: ips[0]}
+	if ip := To4(a.IP); len(ip) > 0 {
+		a.IP = &net.IPAddr{IP: ip}
 	}
 
 	return
@@ -111,21 +145,27 @@ func (a *Address) FromString(addr string) (err error) {
 // FromUDPAddr sets the ip from net.UDPAddr.
 func (a *Address) FromUDPAddr(ua *net.UDPAddr) {
 	a.Port = uint16(ua.Port)
-	a.IP = ua.IP
-	if ipv4 := a.IP.To4(); len(ipv4) > 0 {
-		a.IP = ipv4
-	}
+	a.IP = ua
+}
+
+// FromI2PAddr sets the ip from net.UDPAddr.
+func (a *Address) FromI2PAddr(ua *i2pkeys.I2PAddr) {
+	a.Port = uint16(6881)
+	a.IP = ua
 }
 
 // UDPAddr creates a new net.UDPAddr.
 func (a Address) UDPAddr() *net.UDPAddr {
 	return &net.UDPAddr{
-		IP:   a.IP,
+		IP:   ToIP(a.IP),
 		Port: int(a.Port),
 	}
 }
 
 func (a Address) String() string {
+	if a.IP == nil {
+		return net.JoinHostPort("127.0.0.1", strconv.FormatUint(uint64(a.Port), 10))
+	}
 	if a.Port == 0 {
 		return a.IP.String()
 	}
@@ -135,18 +175,18 @@ func (a Address) String() string {
 // Equal reports whether n is equal to o, which is equal to
 //   n.HasIPAndPort(o.IP, o.Port)
 func (a Address) Equal(o Address) bool {
-	return a.Port == o.Port && a.IP.Equal(o.IP)
+	return a.Port == o.Port && ToIP(a.IP).Equal(ToIP(o.IP))
 }
 
 // HasIPAndPort reports whether the current node has the ip and the port.
 func (a Address) HasIPAndPort(ip net.IP, port uint16) bool {
-	return port == a.Port && a.IP.Equal(ip)
+	return port == a.Port && ToIP(a.IP).Equal(ip)
 }
 
 // WriteBinary is the same as MarshalBinary, but writes the result into w
 // instead of returning.
 func (a Address) WriteBinary(w io.Writer) (m int, err error) {
-	if m, err = w.Write(a.IP); err == nil {
+	if m, err = w.Write([]byte(To4(a.IP))); err == nil {
 		if err = binary.Write(w, binary.BigEndian, a.Port); err == nil {
 			m += 2
 		}
@@ -163,8 +203,9 @@ func (a *Address) UnmarshalBinary(b []byte) (err error) {
 		return ErrInvalidAddr
 	}
 
-	a.IP = make(net.IP, _len)
-	copy(a.IP, b[:_len])
+	ip := make(net.IP, _len)
+	copy(ip, b[:_len])
+	a.IP = &net.IPAddr{IP: ip}
 	a.Port = binary.BigEndian.Uint16(b[_len:])
 	return
 }
@@ -187,10 +228,11 @@ func (a *Address) decode(vs []interface{}) (err error) {
 	}()
 
 	host := vs[0].(string)
-	if a.IP = net.ParseIP(host); len(a.IP) == 0 {
+	ip := net.ParseIP(host)
+	if len(ip) == 0 {
 		return ErrInvalidAddr
-	} else if ip := a.IP.To4(); len(ip) > 0 {
-		a.IP = ip
+	} else if ipv4 := ip.To4(); len(ipv4) > 0 {
+		a.IP = &net.IPAddr{IP: ip}
 	}
 
 	a.Port = uint16(vs[1].(int64))
@@ -278,7 +320,7 @@ func (a HostAddress) String() string {
 // Addresses parses the host address to a list of Addresses.
 func (a HostAddress) Addresses() (addrs []Address, err error) {
 	if ip := net.ParseIP(a.Host); len(ip) > 0 {
-		return []Address{NewAddress(ip, a.Port)}, nil
+		return []Address{NewAddress(&net.IPAddr{IP: ip}, a.Port)}, nil
 	}
 
 	ips, err := net.LookupIP(a.Host)
@@ -287,7 +329,7 @@ func (a HostAddress) Addresses() (addrs []Address, err error) {
 	} else {
 		addrs = make([]Address, len(ips))
 		for i, ip := range ips {
-			addrs[i] = NewAddress(ip, a.Port)
+			addrs[i] = NewAddress(&net.IPAddr{IP: ip}, a.Port)
 		}
 	}
 

@@ -20,6 +20,7 @@ import (
 	"io"
 	"net"
 
+	"github.com/eyedeekay/sam3/i2pkeys"
 	"github.com/xgfone/bt/metainfo"
 )
 
@@ -30,14 +31,33 @@ type Node struct {
 }
 
 // NewNode returns a new Node.
-func NewNode(id metainfo.Hash, ip net.IP, port int) Node {
+func NewNode(id metainfo.Hash, ip net.Addr, port int) Node {
 	return Node{ID: id, Addr: metainfo.NewAddress(ip, uint16(port))}
+}
+
+// NewNodeByUDPAddr returns a new Node with the id and the UDP address.
+func NewNodeByAddr(id metainfo.Hash, addr net.Addr) (n Node) {
+	switch addr.(type) {
+	case *net.UDPAddr:
+		return NewNodeByUDPAddr(id, addr.(*net.UDPAddr))
+	case *i2pkeys.I2PAddr:
+		return NewNodeByI2PAddr(id, addr.(*i2pkeys.I2PAddr))
+	default:
+		return Node{}
+	}
 }
 
 // NewNodeByUDPAddr returns a new Node with the id and the UDP address.
 func NewNodeByUDPAddr(id metainfo.Hash, addr *net.UDPAddr) (n Node) {
 	n.ID = id
 	n.Addr.FromUDPAddr(addr)
+	return
+}
+
+// NewNodeByI2PAddr returns a new Node with the id and the UDP address.
+func NewNodeByI2PAddr(id metainfo.Hash, addr *i2pkeys.I2PAddr) (n Node) {
+	n.ID = id
+	n.Addr.FromI2PAddr(addr)
 	return
 }
 

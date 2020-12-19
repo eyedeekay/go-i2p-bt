@@ -34,6 +34,7 @@ type routingTable struct {
 	k    int
 	s    *Server
 	ipv6 bool
+	i2p  bool
 	sync chan struct{}
 	exit chan struct{}
 	root metainfo.Hash
@@ -41,11 +42,12 @@ type routingTable struct {
 	bkts []*bucket
 }
 
-func newRoutingTable(s *Server, ipv6 bool) *routingTable {
+func newRoutingTable(s *Server, ipv6, i2p bool) *routingTable {
 	rt := &routingTable{
 		k:    s.conf.K,
 		s:    s,
 		ipv6: ipv6,
+		i2p:  i2p,
 		root: s.conf.ID,
 		sync: make(chan struct{}),
 		exit: make(chan struct{}),
@@ -57,9 +59,9 @@ func newRoutingTable(s *Server, ipv6 bool) *routingTable {
 	}
 
 	// Load all the nodes from the storage.
-	nodes, err := s.conf.RoutingTableStorage.Load(s.conf.ID, ipv6)
+	nodes, err := s.conf.RoutingTableStorage.Load(s.conf.ID, ipv6, i2p)
 	if err != nil {
-		s.conf.ErrorLog("fail to load routing table(ipv6=%v): %s", ipv6, err)
+		s.conf.ErrorLog("fail to load routing table(ipv6=%v, i2p=%v): %s", ipv6, i2p, err)
 	} else {
 		now := time.Now()
 		for _, node := range nodes {

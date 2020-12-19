@@ -19,18 +19,19 @@ import (
 	"sync"
 	"time"
 
+	"github.com/eyedeekay/sam3/i2pkeys"
 	"github.com/xgfone/bt/metainfo"
 )
 
 // PeerManager is used to manage the peers.
 type PeerManager interface {
 	// If ipv6 is true, only return ipv6 addresses. Or return ipv4 addresses.
-	GetPeers(infohash metainfo.Hash, maxnum int, ipv6 bool) []metainfo.Address
+	GetPeers(infohash metainfo.Hash, maxnum int, ipv6, i2p bool) []metainfo.Address
 }
 
 type peer struct {
 	ID    metainfo.Hash
-	IP    net.IP
+	IP    net.Addr
 	Port  uint16
 	Token string
 	Time  time.Time
@@ -75,7 +76,7 @@ func (tpm *tokenPeerManager) Start(interval time.Duration) {
 	}
 }
 
-func (tpm *tokenPeerManager) Set(id metainfo.Hash, addr *net.UDPAddr, token string) {
+func (tpm *tokenPeerManager) Set(id metainfo.Hash, addr net.Addr, token string) {
 	addrkey := addr.String()
 	tpm.lock.Lock()
 	peers, ok := tpm.peers[id]
@@ -83,10 +84,11 @@ func (tpm *tokenPeerManager) Set(id metainfo.Hash, addr *net.UDPAddr, token stri
 		peers = make(map[string]peer, 4)
 		tpm.peers[id] = peers
 	}
+	_, port := SplitHostPort(addr)
 	peers[addrkey] = peer{
 		ID:    id,
-		IP:    addr.IP,
-		Port:  uint16(addr.Port),
+		IP:    addr,
+		Port:  uint16(port),
 		Token: token,
 		Time:  time.Now(),
 	}
@@ -114,7 +116,7 @@ func (tpm *tokenPeerManager) Stop() {
 }
 
 func (tpm *tokenPeerManager) GetPeers(infohash metainfo.Hash, maxnum int,
-	ipv6 bool) (addrs []metainfo.Address) {
+	ipv6, i2p bool) (addrs []metainfo.Address) {
 	addrs = make([]metainfo.Address, 0, maxnum)
 	tpm.lock.RLock()
 	if peers, ok := tpm.peers[infohash]; ok {
@@ -123,14 +125,21 @@ func (tpm *tokenPeerManager) GetPeers(infohash metainfo.Hash, maxnum int,
 				break
 			}
 
+			if i2p {
+				if isI2P(peer.IP) {
+					maxnum--
+					addrs = append(addrs, metainfo.NewAddress(peer.IP.(*i2pkeys.I2PAddr), peer.Port))
+				}
+			}
+
 			if ipv6 { // For IPv6
 				if isIPv6(peer.IP) {
 					maxnum--
-					addrs = append(addrs, metainfo.NewAddress(peer.IP, peer.Port))
+					addrs = append(addrs, metainfo.NewAddress(peer.IP.(*net.UDPAddr), peer.Port))
 				}
 			} else if !isIPv6(peer.IP) { // For IPv4
 				maxnum--
-				addrs = append(addrs, metainfo.NewAddress(peer.IP, peer.Port))
+				addrs = append(addrs, metainfo.NewAddress(peer.IP.(*net.UDPAddr), peer.Port))
 			}
 		}
 	}

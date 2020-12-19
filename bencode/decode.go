@@ -116,7 +116,6 @@ func (d *Decoder) Decode(val interface{}) error {
 	if rv.Kind() != reflect.Ptr || rv.IsNil() {
 		return errors.New("Unwritable type passed into decode")
 	}
-
 	return d.decodeInto(rv)
 }
 
@@ -131,6 +130,12 @@ func DecodeString(in string, val interface{}) error {
 // DecodeBytes reads the data in b and stores it into the value pointed to by val.
 // Read the docs for Decode for more information.
 func DecodeBytes(b []byte, val interface{}) error {
+	if b == nil {
+		return nil
+	}
+	if val == nil {
+		return nil
+	}
 	r := bytes.NewReader(b)
 	d := NewDecoder(r)
 	return d.Decode(val)
@@ -173,7 +178,6 @@ func (d *Decoder) decodeInto(val reflect.Value) (err error) {
 			textUnmarshaler encoding.TextUnmarshaler
 		)
 		unmarshaler, textUnmarshaler, v = d.indirect(val)
-
 		// if we're decoding into an Unmarshaler,
 		// we pass on the next bencode value to this value instead,
 		// so it can decide what to do with it.

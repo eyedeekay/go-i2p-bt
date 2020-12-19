@@ -22,6 +22,8 @@ import (
 	"io"
 	"log"
 	"net"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -43,6 +45,7 @@ var errUnsupportedIPProtocol = fmt.Errorf("unsupported ip protocol")
 const (
 	IPv4Protocol IPProtocolStack = 4
 	IPv6Protocol IPProtocolStack = 6
+	I2PProtocol  IPProtocolStack = 4
 )
 
 // IPProtocolStack represents the ip protocol stack, such as IPv4 or IPv6
@@ -53,7 +56,8 @@ type Result struct {
 	// Addr is the address of the peer where the request is sent to.
 	//
 	// Notice: it may be nil for "get_peers" request.
-	Addr *net.UDPAddr
+	//Addr *net.UDPAddr
+	Addr net.Addr
 
 	// For Error
 	Code    int    // 0 represents the success.
@@ -138,14 +142,16 @@ type Config struct {
 	// that's, the "get_peers" query.
 	//
 	// The default callback does noting.
-	OnSearch func(infohash string, ip net.IP, port uint16)
+	//OnSearch func(infohash string, ip net.Addr, port uint16)
+	OnSearch func(infohash string, ip net.Addr, port uint16)
 
 	// OnTorrent is called when someone has the torrent infohash
 	// or someone has just downloaded the torrent infohash,
 	// that's, the "get_peers" response or "announce_peer" query.
 	//
 	// The default callback does noting.
-	OnTorrent func(infohash string, ip net.IP, port uint16)
+	//OnTorrent func(infohash string, ip net.Addr, port uint16)
+	OnTorrent func(infohash string, ip net.Addr, port uint16)
 
 	// HandleInMessage is used to intercept the incoming DHT message.
 	// For example, you can debug the message as the log.
@@ -153,7 +159,7 @@ type Config struct {
 	// Return true if going on handling by the default. Or return false.
 	//
 	// The default is nil.
-	HandleInMessage func(*net.UDPAddr, *krpc.Message) bool
+	HandleInMessage func(net.Addr, *krpc.Message) bool
 
 	// HandleOutMessage is used to intercept the outgoing DHT message.
 	// For example, you can debug the message as the log.
@@ -161,11 +167,11 @@ type Config struct {
 	// Return (false, nil) if going on handling by the default.
 	//
 	// The default is nil.
-	HandleOutMessage func(*net.UDPAddr, *krpc.Message) (wrote bool, err error)
+	HandleOutMessage func(net.Addr, *krpc.Message) (wrote bool, err error)
 }
 
-func (c Config) in(*net.UDPAddr, *krpc.Message) bool           { return true }
-func (c Config) out(*net.UDPAddr, *krpc.Message) (bool, error) { return false, nil }
+func (c Config) in(net.Addr, *krpc.Message) bool           { return true }
+func (c Config) out(net.Addr, *krpc.Message) (bool, error) { return false, nil }
 
 func (c *Config) set(conf ...Config) {
 	if len(conf) > 0 {
@@ -197,10 +203,10 @@ func (c *Config) set(conf ...Config) {
 		c.RespTimeout = time.Second * 10
 	}
 	if c.OnSearch == nil {
-		c.OnSearch = func(string, net.IP, uint16) {}
+		c.OnSearch = func(string, net.Addr, uint16) {}
 	}
 	if c.OnTorrent == nil {
-		c.OnTorrent = func(string, net.IP, uint16) {}
+		c.OnTorrent = func(string, net.Addr, uint16) {}
 	}
 	if c.HandleInMessage == nil {
 		c.HandleInMessage = c.in
@@ -219,14 +225,22 @@ type Server struct {
 
 	ipv4 bool
 	ipv6 bool
+	i2p  bool
 	want []krpc.Want
 
 	peerManager        PeerManager
 	routingTable4      *routingTable
 	routingTable6      *routingTable
+	routingTableI2P    *routingTable
 	tokenManager       *tokenManager
 	tokenPeerManager   *tokenPeerManager
 	transactionManager *transactionManager
+}
+
+func SplitHostPort(raddr net.Addr) (string, int) {
+	var host, port, _ = net.SplitHostPort(raddr.String())
+	portint, _ := strconv.Atoi(port)
+	return host, portint
 }
 
 // NewServer returns a new DHT server.
@@ -235,19 +249,23 @@ func NewServer(conn net.PacketConn, config ...Config) *Server {
 	conf.set(config...)
 
 	if len(conf.IPProtocols) == 0 {
-		host, _, err := net.SplitHostPort(conn.LocalAddr().String())
-		if err != nil {
-			panic(err)
-		} else if ip := net.ParseIP(host); ipIsZero(ip) {
-			conf.IPProtocols = []IPProtocolStack{IPv4Protocol, IPv6Protocol}
-		} else if ip.To4() != nil {
-			conf.IPProtocols = []IPProtocolStack{IPv4Protocol}
+		if strings.HasSuffix(conn.LocalAddr().String(), ".i2p") {
+			conf.IPProtocols = []IPProtocolStack{I2PProtocol}
 		} else {
-			conf.IPProtocols = []IPProtocolStack{IPv6Protocol}
+			host, _, err := net.SplitHostPort(conn.LocalAddr().String())
+			if err != nil {
+				panic(err)
+			} else if ip := net.ParseIP(host); ipIsZero(&net.IPAddr{IP: ip}) {
+				conf.IPProtocols = []IPProtocolStack{IPv4Protocol, IPv6Protocol}
+			} else if ip.To4() != nil {
+				conf.IPProtocols = []IPProtocolStack{IPv4Protocol}
+			} else {
+				conf.IPProtocols = []IPProtocolStack{IPv6Protocol}
+			}
 		}
 	}
 
-	var ipv4, ipv6 bool
+	var ipv4, ipv6, i2p bool
 	var want []krpc.Want
 	for _, ip := range conf.IPProtocols {
 		switch ip {
@@ -257,12 +275,17 @@ func NewServer(conn net.PacketConn, config ...Config) *Server {
 		case IPv6Protocol:
 			ipv6 = true
 			want = append(want, krpc.WantNodes6)
+		case I2PProtocol:
+			i2p = true
+			want = append(want, krpc.WantNodesInvisible)
 		}
+
 	}
 
 	s := &Server{
 		ipv4:               ipv4,
 		ipv6:               ipv6,
+		i2p:                i2p,
 		want:               want,
 		conn:               conn,
 		conf:               conf,
@@ -273,8 +296,9 @@ func NewServer(conn net.PacketConn, config ...Config) *Server {
 		transactionManager: newTransactionManager(),
 	}
 
-	s.routingTable4 = newRoutingTable(s, false)
-	s.routingTable6 = newRoutingTable(s, true)
+	s.routingTable4 = newRoutingTable(s, false, false)
+	s.routingTable6 = newRoutingTable(s, true, false)
+	s.routingTableI2P = newRoutingTable(s, false, true)
 	if s.peerManager == nil {
 		s.peerManager = s.tokenPeerManager
 	}
@@ -324,7 +348,7 @@ func (s *Server) Node6Num() int { return s.routingTable6.Len() }
 //
 func (s *Server) AddNode(node krpc.Node) int {
 	// For IPv6
-	if isIPv6(node.Addr.IP) {
+	if isIPv6(node.Addr) {
 		if s.ipv6 {
 			return s.routingTable6.AddNode(node)
 		}
@@ -339,13 +363,14 @@ func (s *Server) AddNode(node krpc.Node) int {
 	return NodeNotAdded
 }
 
-func (s *Server) addNode(a *net.UDPAddr, id metainfo.Hash, ro bool) (r int) {
+func (s *Server) addNode(a net.Addr, id metainfo.Hash, ro bool) (r int) {
 	if ro { // BEP 43
 		return NodeNotAdded
 	}
 
-	if r = s.AddNode(krpc.NewNodeByUDPAddr(id, a)); r == NodeExistAndChanged {
-		s.conf.Blacklist.Add(a.IP.String(), a.Port)
+	if r = s.AddNode(krpc.NewNodeByAddr(id, a)); r == NodeExistAndChanged {
+		host, port := SplitHostPort(a)
+		s.conf.Blacklist.Add(host, port)
 	}
 
 	return
@@ -375,6 +400,7 @@ func (s *Server) Close() { s.once.Do(s.stop) }
 func (s *Server) Sync() {
 	s.routingTable4.Sync()
 	s.routingTable6.Sync()
+	s.routingTableI2P.Sync()
 }
 
 // Run starts the DHT server.
@@ -393,12 +419,12 @@ func (s *Server) Run() {
 			return
 		}
 
-		s.handlePacket(raddr.(*net.UDPAddr), buf[:n])
+		s.handlePacket(raddr, buf[:n])
 	}
 }
 
-func (s *Server) isDisabled(raddr *net.UDPAddr) bool {
-	if isIPv6(raddr.IP) {
+func (s *Server) isDisabled(raddr net.Addr) bool {
+	if isIPv6(raddr) {
 		if !s.ipv6 {
 			return true
 		}
@@ -409,13 +435,14 @@ func (s *Server) isDisabled(raddr *net.UDPAddr) bool {
 }
 
 // HandlePacket handles the incoming DHT message.
-func (s *Server) handlePacket(raddr *net.UDPAddr, data []byte) {
+func (s *Server) handlePacket(raddr net.Addr, data []byte) {
 	if s.isDisabled(raddr) {
 		return
 	}
 
 	// Check whether the raddr is in the ip blacklist. If yes, discard it.
-	if s.conf.Blacklist.In(raddr.IP.String(), raddr.Port) {
+	var host, port = SplitHostPort(raddr)
+	if s.conf.Blacklist.In(host, port) {
 		return
 	}
 
@@ -432,7 +459,7 @@ func (s *Server) handlePacket(raddr *net.UDPAddr, data []byte) {
 	go s.handleMessage(raddr, msg)
 }
 
-func (s *Server) handleMessage(raddr *net.UDPAddr, m krpc.Message) {
+func (s *Server) handleMessage(raddr net.Addr, m krpc.Message) {
 	if !s.conf.HandleInMessage(raddr, &m) {
 		return
 	}
@@ -464,7 +491,8 @@ func (s *Server) handleMessage(raddr *net.UDPAddr, m krpc.Message) {
 	}
 }
 
-func (s *Server) handleQuery(raddr *net.UDPAddr, m krpc.Message) {
+//func (s *Server) handleQuery(raddr net.Addr, m krpc.Message) {
+func (s *Server) handleQuery(raddr net.Addr, m krpc.Message) {
 	switch m.Q {
 	case queryMethodPing:
 		s.reply(raddr, m.T, krpc.ResponseResult{})
@@ -472,8 +500,9 @@ func (s *Server) handleQuery(raddr *net.UDPAddr, m krpc.Message) {
 		var r krpc.ResponseResult
 		n4 := m.A.ContainsWant(krpc.WantNodes)
 		n6 := m.A.ContainsWant(krpc.WantNodes6)
-		if !n4 && !n6 {
-			if isIPv6(raddr.IP) {
+		ni := m.A.ContainsWant(krpc.WantNodesInvisible)
+		if !n4 && !n6 && !ni {
+			if isIPv6(raddr) {
 				r.Nodes6 = s.routingTable6.Closest(m.A.InfoHash, s.conf.K)
 			} else {
 				r.Nodes = s.routingTable4.Closest(m.A.InfoHash, s.conf.K)
@@ -485,23 +514,35 @@ func (s *Server) handleQuery(raddr *net.UDPAddr, m krpc.Message) {
 			if n6 {
 				r.Nodes6 = s.routingTable6.Closest(m.A.InfoHash, s.conf.K)
 			}
+			if ni {
+				r.NodesI2P = s.routingTableI2P.Closest(m.A.InfoHash, s.conf.K)
+			}
 		}
 		s.reply(raddr, m.T, r)
 	case queryMethodGetPeers: // See BEP 32
 		n4 := m.A.ContainsWant(krpc.WantNodes)
 		n6 := m.A.ContainsWant(krpc.WantNodes6)
-
+		ni := m.A.ContainsWant(krpc.WantNodesInvisible)
 		// Get the ipv4/ipv6 peers storing the torrent infohash.
 		var r krpc.ResponseResult
-		if !n4 && !n6 {
-			r.Values = s.peerManager.GetPeers(m.A.InfoHash, s.conf.K, isIPv6(raddr.IP))
+		if !n4 && !n6 && !ni {
+			r.Values = s.peerManager.GetPeers(m.A.InfoHash, s.conf.K, isIPv6(raddr), isI2P(raddr))
 		} else {
 			if n4 {
-				r.Values = s.peerManager.GetPeers(m.A.InfoHash, s.conf.K, false)
+				r.Values = s.peerManager.GetPeers(m.A.InfoHash, s.conf.K, false, false)
 			}
 
 			if n6 {
-				values := s.peerManager.GetPeers(m.A.InfoHash, s.conf.K, true)
+				values := s.peerManager.GetPeers(m.A.InfoHash, s.conf.K, true, false)
+				if len(r.Values) == 0 {
+					r.Values = values
+				} else {
+					r.Values = append(r.Values, values...)
+				}
+			}
+
+			if ni {
+				values := s.peerManager.GetPeers(m.A.InfoHash, s.conf.K, false, true)
 				if len(r.Values) == 0 {
 					r.Values = values
 				} else {
@@ -513,7 +554,7 @@ func (s *Server) handleQuery(raddr *net.UDPAddr, m krpc.Message) {
 		// No Peers, and return the closest other nodes.
 		if len(r.Values) == 0 {
 			if !n4 && !n6 {
-				if isIPv6(raddr.IP) {
+				if isIPv6(raddr) {
 					r.Nodes6 = s.routingTable6.Closest(m.A.InfoHash, s.conf.K)
 				} else {
 					r.Nodes = s.routingTable4.Closest(m.A.InfoHash, s.conf.K)
@@ -530,19 +571,21 @@ func (s *Server) handleQuery(raddr *net.UDPAddr, m krpc.Message) {
 
 		r.Token = s.tokenManager.Token(raddr)
 		s.reply(raddr, m.T, r)
-		s.conf.OnSearch(m.A.InfoHash.HexString(), raddr.IP, uint16(raddr.Port))
+		_, port := SplitHostPort(raddr)
+		s.conf.OnSearch(m.A.InfoHash.HexString(), raddr, uint16(port))
 	case queryMethodAnnouncePeer:
 		if s.tokenManager.Check(raddr, m.A.Token) {
 			return
 		}
 		s.reply(raddr, m.T, krpc.ResponseResult{})
-		s.conf.OnTorrent(m.A.InfoHash.HexString(), raddr.IP, m.A.GetPort(raddr.Port))
+		_, port := SplitHostPort(raddr)
+		s.conf.OnTorrent(m.A.InfoHash.HexString(), raddr, m.A.GetPort(port))
 	default:
 		s.sendError(raddr, m.T, "unknown query method", krpc.ErrorCodeMethodUnknown)
 	}
 }
 
-func (s *Server) send(raddr *net.UDPAddr, m krpc.Message) (wrote bool, err error) {
+func (s *Server) send(raddr net.Addr, m krpc.Message) (wrote bool, err error) {
 	// // TODO: Should we check the ip blacklist??
 	// if s.conf.Blacklist.In(raddr.IP.String(), raddr.Port) {
 	//     return
@@ -556,7 +599,7 @@ func (s *Server) send(raddr *net.UDPAddr, m krpc.Message) (wrote bool, err error
 	return
 }
 
-func (s *Server) _send(raddr *net.UDPAddr, m krpc.Message) (wrote bool, err error) {
+func (s *Server) _send(raddr net.Addr, m krpc.Message) (wrote bool, err error) {
 	if m.T == "" || m.Y == "" {
 		panic(`DHT message "t" or "y" must not be empty`)
 	}
@@ -570,7 +613,8 @@ func (s *Server) _send(raddr *net.UDPAddr, m krpc.Message) (wrote bool, err erro
 	n, err := s.conn.WriteTo(buf.Bytes(), raddr)
 	if err != nil {
 		err = fmt.Errorf("error writing %d bytes to %s: %s", buf.Len(), raddr, err)
-		s.conf.Blacklist.Add(raddr.IP.String(), 0)
+		host, _, _ := net.SplitHostPort(raddr.String())
+		s.conf.Blacklist.Add(host, 0)
 		return
 	}
 
@@ -582,13 +626,13 @@ func (s *Server) _send(raddr *net.UDPAddr, m krpc.Message) (wrote bool, err erro
 	return
 }
 
-func (s *Server) sendError(raddr *net.UDPAddr, tid, reason string, code int) {
+func (s *Server) sendError(raddr net.Addr, tid, reason string, code int) {
 	if _, err := s.send(raddr, krpc.NewErrorMsg(tid, code, reason)); err != nil {
 		s.conf.ErrorLog("error replying to %s: %s", raddr.String(), err.Error())
 	}
 }
 
-func (s *Server) reply(raddr *net.UDPAddr, tid string, r krpc.ResponseResult) {
+func (s *Server) reply(raddr net.Addr, tid string, r krpc.ResponseResult) {
 	r.ID = s.conf.ID
 	if _, err := s.send(raddr, krpc.NewResponseMsg(tid, r)); err != nil {
 		s.conf.ErrorLog("error replying to %s: %s", raddr.String(), err.Error())
@@ -625,11 +669,11 @@ func (s *Server) onTimeout(t *transaction) {
 		t.ID, t.Query, t.Addr.String())
 }
 
-func (s *Server) onPingResp(t *transaction, a *net.UDPAddr, m krpc.Message) {
+func (s *Server) onPingResp(t *transaction, a net.Addr, m krpc.Message) {
 	t.Done(Result{})
 }
 
-func (s *Server) onGetPeersResp(t *transaction, a *net.UDPAddr, m krpc.Message) {
+func (s *Server) onGetPeersResp(t *transaction, a net.Addr, m krpc.Message) {
 	// Store the response node with the token.
 	if m.R.Token != "" {
 		s.tokenPeerManager.Set(m.R.ID, a, m.R.Token)
@@ -639,7 +683,7 @@ func (s *Server) onGetPeersResp(t *transaction, a *net.UDPAddr, m krpc.Message) 
 	if len(m.R.Values) > 0 {
 		t.Done(Result{Peers: m.R.Values})
 		for _, addr := range m.R.Values {
-			s.conf.OnTorrent(t.Arg.InfoHash.HexString(), addr.IP, addr.Port)
+			s.conf.OnTorrent(t.Arg.InfoHash.HexString(), addr, addr.Port)
 		}
 		return
 	}
@@ -703,7 +747,7 @@ func (s *Server) getPeers(info metainfo.Hash, addr metainfo.Address, depth int,
 
 // Ping sends a PING query to addr, and the callback function cb will be called
 // when the response or error is returned, or it's timeout.
-func (s *Server) Ping(addr *net.UDPAddr, cb ...func(Result)) (err error) {
+func (s *Server) Ping(addr net.Addr, cb ...func(Result)) (err error) {
 	t := newTransaction(s, addr, queryMethodPing, krpc.QueryArg{}, cb...)
 	t.OnResponse = s.onPingResp
 	return s.request(t)
@@ -719,7 +763,6 @@ func (s *Server) GetPeers(infohash metainfo.Hash, cb ...func(Result)) {
 	if infohash.IsZero() {
 		panic("the infohash of the torrent is ZERO")
 	}
-
 	var nodes []krpc.Node
 	if s.ipv4 {
 		nodes = s.routingTable4.Closest(infohash, s.conf.K)
@@ -743,7 +786,6 @@ func (s *Server) GetPeers(infohash metainfo.Hash, cb ...func(Result)) {
 	for _, node := range nodes {
 		s.getPeers(infohash, node.Addr, s.conf.SearchDepth, ids, cb...)
 	}
-
 }
 
 // AnnouncePeer announces the torrent infohash to the K closest nodes,
@@ -784,7 +826,7 @@ func (s *Server) AnnouncePeer(infohash metainfo.Hash, port uint16, impliedPort b
 // FindNode sends the "find_node" query to the addr to find the target node.
 //
 // Notice: In general, it's used to bootstrap the routing table.
-func (s *Server) FindNode(addr *net.UDPAddr, target metainfo.Hash) error {
+func (s *Server) FindNode(addr net.Addr, target metainfo.Hash) error {
 	if target.IsZero() {
 		panic("the target is ZERO")
 	}
@@ -792,7 +834,7 @@ func (s *Server) FindNode(addr *net.UDPAddr, target metainfo.Hash) error {
 	return s.findNode(target, addr, s.conf.SearchDepth, nil)
 }
 
-func (s *Server) findNode(target metainfo.Hash, addr *net.UDPAddr, depth int,
+func (s *Server) findNode(target metainfo.Hash, addr net.Addr, depth int,
 	ids metainfo.Hashes) error {
 	arg := krpc.QueryArg{Target: target, Wants: s.want}
 	t := newTransaction(s, addr, queryMethodFindNode, arg)
@@ -801,7 +843,7 @@ func (s *Server) findNode(target metainfo.Hash, addr *net.UDPAddr, depth int,
 	return s.request(t)
 }
 
-func (s *Server) onFindNodeResp(t *transaction, a *net.UDPAddr, m krpc.Message) {
+func (s *Server) onFindNodeResp(t *transaction, a net.Addr, m krpc.Message) {
 	// Search the target node recursively.
 	t.Depth--
 	if t.Depth < 1 {
@@ -849,15 +891,27 @@ func (s *Server) onFindNodeResp(t *transaction, a *net.UDPAddr, m krpc.Message) 
 	}
 }
 
-func isIPv6(ip net.IP) bool {
-	if ip.To4() == nil {
+func isIPv6(ip net.Addr) bool {
+	rawip := net.ParseIP(ip.String())
+	if rawip == nil {
+		return false
+	}
+	if rawip.To4() == nil {
 		return true
 	}
 	return false
 }
 
-func ipIsZero(ip net.IP) bool {
-	for _, b := range ip {
+func isI2P(ip net.Addr) bool {
+	if ip.Network() == "I2P" {
+		return true
+	}
+	return false
+}
+
+func ipIsZero(ip net.Addr) bool {
+	rawip := net.ParseIP(ip.String())
+	for _, b := range rawip {
 		if b != 0 {
 			return false
 		}

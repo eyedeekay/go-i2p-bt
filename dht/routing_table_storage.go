@@ -29,7 +29,7 @@ type RoutingTableNode struct {
 
 // RoutingTableStorage is used to store the nodes in the routing table.
 type RoutingTableStorage interface {
-	Load(ownid metainfo.Hash, ipv6 bool) (nodes []RoutingTableNode, err error)
+	Load(ownid metainfo.Hash, ipv6, i2p bool) (nodes []RoutingTableNode, err error)
 	Dump(ownid metainfo.Hash, nodes []RoutingTableNode, ipv6 bool) (err error)
 }
 
@@ -38,5 +38,5 @@ func NewNoopRoutingTableStorage() RoutingTableStorage { return noopStorage{} }
 
 type noopStorage struct{}
 
-func (s noopStorage) Load(metainfo.Hash, bool) (nodes []RoutingTableNode, err error) { return }
-func (s noopStorage) Dump(metainfo.Hash, []RoutingTableNode, bool) (err error)       { return }
+func (s noopStorage) Load(metainfo.Hash, bool, bool) (nodes []RoutingTableNode, err error) { return }
+func (s noopStorage) Dump(metainfo.Hash, []RoutingTableNode, bool) (err error)             { return }
