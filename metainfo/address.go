@@ -197,7 +197,7 @@ func (a Address) String() string {
 	host, port := SplitHostPort(a.Addr)
 	if port != 0 {
 		r := net.JoinHostPort(host, strconv.FormatUint(uint64(port), 10))
-  	log.Println("STRING", r)
+		log.Println("STRING", r)
 		return r
 	}
 	if a.Port == 0 {
