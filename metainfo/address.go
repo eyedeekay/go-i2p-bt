@@ -22,6 +22,7 @@ import (
 	"log"
 	"net"
 	"strconv"
+	"strings"
 
 	"github.com/eyedeekay/sam3/i2pkeys"
 	"github.com/xgfone/bt/bencode"
@@ -47,37 +48,55 @@ func EmtpyAddress() Address {
 }
 
 func To4(addr net.Addr) net.IP {
+	if addr == nil {
+		return net.ParseIP("127.0.0.1")
+	}
 	rawip := net.ParseIP(addr.String())
 	if rawip == nil {
-		return nil
+		return net.ParseIP("127.0.0.1")
 	}
 	return rawip.To4()
 }
 
 func To16(addr net.Addr) net.IP {
+	if addr == nil {
+		return net.ParseIP("127.0.0.1")
+	}
 	rawip := net.ParseIP(addr.String())
 	if rawip == nil {
-		return nil
+		return net.ParseIP("127.0.0.1")
 	}
 	return rawip.To16()
 }
 
 func ToIP(addr net.Addr) net.IP {
+	if addr == nil {
+		return net.ParseIP("127.0.0.1")
+	}
 	return net.ParseIP(addr.String())
 }
 
 func SplitHostPort(raddr net.Addr) (string, int) {
-	var host, port, _ = net.SplitHostPort(raddr.String())
+	var host, port, err = net.SplitHostPort(raddr.String())
+	if err != nil {
+		host = net.ParseIP(raddr.String()).String()
+		port = strings.Replace(raddr.String(), ":", "", -1)
+	}
+	log.Println("SPLIT host:", host, "port:", port, "raddr", raddr)
+	if host == "" {
+		host = "127.0.0.1"
+	}
 	portint, _ := strconv.Atoi(port)
 	return host, portint
 }
 
 // NewAddress returns a new Address.
 func NewAddress(ip net.Addr, port uint16) Address {
-	if ipv4 := To4(ip); len(ipv4) > 0 {
-		return Address{Addr: ip, Port: port}
+	addr := &Address{
+		Addr: &net.IPAddr{IP: ip.(*net.IPAddr).IP},
+		Port: port,
 	}
-	return Address{Addr: ip, Port: port}
+	return *addr
 }
 
 func (a Address) Network() string {
@@ -172,15 +191,21 @@ func (a Address) UDPAddr() *net.UDPAddr {
 func (a Address) String() string {
 	if a.Addr == nil {
 		if a.Port == 0 {
-			return net.JoinHostPort("127.0.0.1", strconv.FormatUint(uint64(0), 10))
+			return "127.0.0.1"
 		}
 		return net.JoinHostPort("127.0.0.1", strconv.FormatUint(uint64(a.Port), 10))
 	}
-	host, _ := SplitHostPort(a.Addr)
+	host, port := SplitHostPort(a.Addr)
+	if port != 0 {
+		r := net.JoinHostPort(host, strconv.FormatUint(uint64(port), 10))
+		return r
+	}
 	if a.Port == 0 {
 		return host
 	}
-	return net.JoinHostPort(host, strconv.FormatUint(uint64(a.Port), 10))
+	r := net.JoinHostPort(host, strconv.FormatUint(uint64(a.Port), 10))
+	log.Println("STRING", r)
+	return r
 }
 
 // Equal reports whether n is equal to o, which is equal to
@@ -200,7 +225,8 @@ func (a Address) HasIPAndPort(ip net.IP, port uint16) bool {
 // WriteBinary is the same as MarshalBinary, but writes the result into w
 // instead of returning.
 func (a Address) WriteBinary(w io.Writer) (m int, err error) {
-	if m, err = w.Write([]byte(To4(a.Addr))); err == nil {
+	//To4(a.Addr)
+	if m, err = w.Write([]byte(ToIP(a.Addr))); err == nil {
 		if err = binary.Write(w, binary.BigEndian, a.Port); err == nil {
 			m += 2
 		}
@@ -228,6 +254,7 @@ func (a *Address) UnmarshalBinary(b []byte) (err error) {
 // MarshalBinary implements the interface binary.BinaryMarshaler.
 func (a Address) MarshalBinary() (data []byte, err error) {
 	buf := bytes.NewBuffer(nil)
+	log.Println("Marshal IP", a)
 	buf.Grow(20)
 	if _, err = a.WriteBinary(buf); err == nil {
 		data = buf.Bytes()
@@ -242,12 +269,19 @@ func (a *Address) decode(vs []interface{}) (err error) {
 		}
 	}()
 
-	host, _, _ := net.SplitHostPort(vs[0].(string))
-	ip := net.ParseIP(host)
+	//host, _, _ := net.SplitHostPort(vs[0].(string))
+	ip := net.ParseIP(vs[0].(string))
+
 	if len(ip) == 0 {
 		return ErrInvalidAddr
 	} else if ipv4 := ip.To4(); len(ipv4) > 0 {
-		a.Addr = &net.IPAddr{IP: ip}
+		log.Println("DECODE ip", ip)
+		log.Println("DECODE vs", vs[0], ":", vs[1])
+		log.Println("DECODE ipv4", ipv4)
+		a.Addr = &net.IPAddr{IP: ipv4}
+		//	  a.Port = vs[1]
+		log.Println("DECODE addr", a)
+		//	  a.Addr = &net.IPAddr{IP: ipv4, vs[1]}
 	}
 
 	a.Port = uint16(vs[1].(int64))
@@ -257,14 +291,17 @@ func (a *Address) decode(vs []interface{}) (err error) {
 // UnmarshalBencode implements the interface bencode.Unmarshaler.
 func (a *Address) UnmarshalBencode(b []byte) (err error) {
 	var iface interface{}
+	log.Println("UNMARSHAL", string(b))
 	if err = bencode.NewDecoder(bytes.NewBuffer(b)).Decode(&iface); err != nil {
 		return
 	}
 
 	switch v := iface.(type) {
 	case string:
+		log.Println("UNMARSHAL STRING", v)
 		err = a.FromString(v)
 	case []interface{}:
+		log.Println("UNMARSHAL BINARY", v)
 		err = a.decode(v)
 	default:
 		err = fmt.Errorf("unsupported type: %T", iface)
@@ -277,7 +314,7 @@ func (a *Address) UnmarshalBencode(b []byte) (err error) {
 func (a Address) MarshalBencode() (b []byte, err error) {
 	buf := bytes.NewBuffer(nil)
 	buf.Grow(32)
-	err = bencode.NewEncoder(buf).Encode([]interface{}{a.String(), a.Port})
+	err = bencode.NewEncoder(buf).Encode([]interface{}{ToIP(a.Addr), a.Port})
 	if err == nil {
 		b = buf.Bytes()
 	}
@@ -362,6 +399,8 @@ func (a *HostAddress) decode(vs []interface{}) (err error) {
 			err = e.(error)
 		}
 	}()
+
+	log.Println("FUUUUUUUCK", vs)
 
 	a.Host = vs[0].(string)
 	a.Port = uint16(vs[1].(int64))

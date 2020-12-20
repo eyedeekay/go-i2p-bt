@@ -19,7 +19,7 @@ import (
 )
 
 func TestAddress(t *testing.T) {
-	var addr1 Address
+	var addr1 = EmtpyAddress()
 	if err := addr1.FromString("1.2.3.4:1234"); err != nil {
 		t.Error(err)
 		return
@@ -33,11 +33,11 @@ func TestAddress(t *testing.T) {
 		t.Errorf(`expected 'l7:1.2.3.4i1234ee', but got '%s'`, s)
 	}
 
-	var addr2 Address
+	var addr2 = EmtpyAddress()
 	if err = addr2.UnmarshalBencode(data); err != nil {
 		t.Error(err)
 	} else if addr2.String() != `1.2.3.4:1234` {
-		t.Errorf("expected '1.2.3.4:1234', but got '%s'", addr2)
+		t.Errorf("expected '1.2.3.4:1234', but got '%s'", &addr2)
 	}
 
 	if data, err = addr2.MarshalBinary(); err != nil {
