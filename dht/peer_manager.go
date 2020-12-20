@@ -31,7 +31,7 @@ type PeerManager interface {
 
 type peer struct {
 	ID    metainfo.Hash
-	IP    net.Addr
+	Addr  net.Addr
 	Port  uint16
 	Token string
 	Time  time.Time
@@ -84,10 +84,10 @@ func (tpm *tokenPeerManager) Set(id metainfo.Hash, addr net.Addr, token string) 
 		peers = make(map[string]peer, 4)
 		tpm.peers[id] = peers
 	}
-	_, port := SplitHostPort(addr)
+	host, port := SplitHostPort(addr)
 	peers[addrkey] = peer{
 		ID:    id,
-		IP:    addr,
+		Addr:  &net.IPAddr{IP: net.ParseIP(host)},
 		Port:  uint16(port),
 		Token: token,
 		Time:  time.Now(),
@@ -126,20 +126,20 @@ func (tpm *tokenPeerManager) GetPeers(infohash metainfo.Hash, maxnum int,
 			}
 
 			if i2p {
-				if isI2P(peer.IP) {
+				if isI2P(peer.Addr) {
 					maxnum--
-					addrs = append(addrs, metainfo.NewAddress(peer.IP.(*i2pkeys.I2PAddr), peer.Port))
+					addrs = append(addrs, metainfo.NewAddress(peer.Addr.(*i2pkeys.I2PAddr), peer.Port))
 				}
 			}
 
 			if ipv6 { // For IPv6
-				if isIPv6(peer.IP) {
+				if isIPv6(peer.Addr) {
 					maxnum--
-					addrs = append(addrs, metainfo.NewAddress(peer.IP.(*net.UDPAddr), peer.Port))
+					addrs = append(addrs, metainfo.NewAddress(peer.Addr.(*net.UDPAddr), peer.Port))
 				}
-			} else if !isIPv6(peer.IP) { // For IPv4
+			} else if !isIPv6(peer.Addr) { // For IPv4
 				maxnum--
-				addrs = append(addrs, metainfo.NewAddress(peer.IP.(*net.UDPAddr), peer.Port))
+				addrs = append(addrs, metainfo.NewAddress(peer.Addr.(*net.UDPAddr), peer.Port))
 			}
 		}
 	}

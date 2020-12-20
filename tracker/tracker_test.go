@@ -51,7 +51,7 @@ func (testHandler) OnAnnounce(raddr *net.UDPAddr, req udptracker.AnnounceRequest
 		Interval:  1,
 		Leechers:  2,
 		Seeders:   3,
-		Addresses: []metainfo.Address{{IP: net.ParseIP("127.0.0.1"), Port: 8000}},
+		Addresses: []metainfo.Address{{Addr: &net.IPAddr{IP: net.ParseIP("127.0.0.1")}, Port: 8000}},
 	}
 	return
 }
@@ -99,7 +99,7 @@ func ExampleClient() {
 	fmt.Printf("Leechers: %d\n", resp.Leechers)
 	fmt.Printf("Seeders: %d\n", resp.Seeders)
 	for i, addr := range resp.Addresses {
-		fmt.Printf("Address[%d].IP: %s\n", i, addr.IP.String())
+		fmt.Printf("Address[%d].IP: %s\n", i, addr.String())
 		fmt.Printf("Address[%d].Port: %d\n", i, addr.Port)
 	}
 

@@ -82,7 +82,6 @@ func SplitHostPort(raddr net.Addr) (string, int) {
 		host = net.ParseIP(raddr.String()).String()
 		port = strings.Replace(raddr.String(), ":", "", -1)
 	}
-	log.Println("SPLIT host:", host, "port:", port, "raddr", raddr)
 	if host == "" {
 		host = "127.0.0.1"
 	}
@@ -198,6 +197,7 @@ func (a Address) String() string {
 	host, port := SplitHostPort(a.Addr)
 	if port != 0 {
 		r := net.JoinHostPort(host, strconv.FormatUint(uint64(port), 10))
+  	log.Println("STRING", r)
 		return r
 	}
 	if a.Port == 0 {
@@ -225,8 +225,7 @@ func (a Address) HasIPAndPort(ip net.IP, port uint16) bool {
 // WriteBinary is the same as MarshalBinary, but writes the result into w
 // instead of returning.
 func (a Address) WriteBinary(w io.Writer) (m int, err error) {
-	//To4(a.Addr)
-	if m, err = w.Write([]byte(ToIP(a.Addr))); err == nil {
+	if m, err = w.Write([]byte(To4(a.Addr))); err == nil {
 		if err = binary.Write(w, binary.BigEndian, a.Port); err == nil {
 			m += 2
 		}
@@ -240,7 +239,6 @@ func (a *Address) UnmarshalBinary(b []byte) (err error) {
 	switch _len {
 	case net.IPv4len, net.IPv6len:
 	default:
-		log.Println("UNMARSHAL", _len)
 		return ErrInvalidAddr
 	}
 
@@ -275,13 +273,7 @@ func (a *Address) decode(vs []interface{}) (err error) {
 	if len(ip) == 0 {
 		return ErrInvalidAddr
 	} else if ipv4 := ip.To4(); len(ipv4) > 0 {
-		log.Println("DECODE ip", ip)
-		log.Println("DECODE vs", vs[0], ":", vs[1])
-		log.Println("DECODE ipv4", ipv4)
 		a.Addr = &net.IPAddr{IP: ipv4}
-		//	  a.Port = vs[1]
-		log.Println("DECODE addr", a)
-		//	  a.Addr = &net.IPAddr{IP: ipv4, vs[1]}
 	}
 
 	a.Port = uint16(vs[1].(int64))
@@ -291,17 +283,14 @@ func (a *Address) decode(vs []interface{}) (err error) {
 // UnmarshalBencode implements the interface bencode.Unmarshaler.
 func (a *Address) UnmarshalBencode(b []byte) (err error) {
 	var iface interface{}
-	log.Println("UNMARSHAL", string(b))
 	if err = bencode.NewDecoder(bytes.NewBuffer(b)).Decode(&iface); err != nil {
 		return
 	}
 
 	switch v := iface.(type) {
 	case string:
-		log.Println("UNMARSHAL STRING", v)
 		err = a.FromString(v)
 	case []interface{}:
-		log.Println("UNMARSHAL BINARY", v)
 		err = a.decode(v)
 	default:
 		err = fmt.Errorf("unsupported type: %T", iface)
