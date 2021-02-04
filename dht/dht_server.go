@@ -218,10 +218,10 @@ func (c *Config) set(conf ...Config) {
 
 // Server is a DHT server.
 type Server struct {
-	conf Config
-	exit chan struct{}
-	conn net.PacketConn
-	once sync.Once
+	conf       Config
+	exit       chan struct{}
+	packetConn net.PacketConn
+	once       sync.Once
 
 	ipv4    bool
 	ipv6    bool
@@ -288,7 +288,7 @@ func NewServer(conn net.PacketConn, raw net.PacketConn, config ...Config) *Serve
 		ipv6:               ipv6,
 		i2p:                i2p,
 		want:               want,
-		conn:               conn,
+		packetConn:         conn,
 		conf:               conf,
 		exit:               make(chan struct{}),
 		peerManager:        conf.PeerManager,
@@ -411,20 +411,21 @@ func (s *Server) Sync() {
 func (s *Server) Run() {
 	go s.routingTable4.Start(time.Minute * 5)
 	go s.routingTable6.Start(time.Minute * 5)
+	go s.routingTableI2P.Start(time.Minute * 5)
 	go s.tokenManager.Start(time.Minute * 10)
 	go s.tokenPeerManager.Start(time.Hour * 24)
 	go s.transactionManager.Start(s, s.conf.RespTimeout)
 
 	buf := make([]byte, s.conf.MsgSize)
 	for {
-		n, raddr, err := s.conn.ReadFrom(buf)
+		n, raddr, err := s.packetConn.ReadFrom(buf)
 		if err != nil {
 			s.conf.ErrorLog("fail to read the dht message: %s", err)
 			return
 		}
-
 		s.handlePacket(raddr, buf[:n])
 	}
+
 }
 
 func (s *Server) isDisabled(raddr net.Addr) bool {
@@ -601,7 +602,8 @@ func (s *Server) send(raddr net.Addr, m krpc.Message) (wrote bool, err error) {
 	return
 }
 
-func (s *Server) _send(raddr net.Addr, m krpc.Message) (wrote bool, err error) {
+func (s *Server) _send(raddr net.Addr, m krpc.Message) (bool, error) {
+	var err error
 	if m.T == "" || m.Y == "" {
 		panic(`DHT message "t" or "y" must not be empty`)
 	}
@@ -611,21 +613,31 @@ func (s *Server) _send(raddr net.Addr, m krpc.Message) (wrote bool, err error) {
 	if err = bencode.NewEncoder(buf).Encode(m); err != nil {
 		panic(err)
 	}
+	var n int
 
-	n, err := s.conn.WriteTo(buf.Bytes(), raddr)
-	if err != nil {
-		err = fmt.Errorf("error writing %d bytes to %s: %s", buf.Len(), raddr, err)
-		host, _, _ := net.SplitHostPort(raddr.String())
-		s.conf.Blacklist.Add(host, 0)
-		return
+	if s.i2p {
+		n, err = s.rawConn.WriteTo(buf.Bytes(), raddr)
+		if err != nil {
+			err = fmt.Errorf("error writing %d bytes to %s: %s", buf.Len(), raddr, err)
+			host, _, _ := net.SplitHostPort(raddr.String())
+			s.conf.Blacklist.Add(host, 0)
+			return false, err
+		}
+	} else {
+		n, err = s.packetConn.WriteTo(buf.Bytes(), raddr)
+		if err != nil {
+			err = fmt.Errorf("error writing %d bytes to %s: %s", buf.Len(), raddr, err)
+			host, _, _ := net.SplitHostPort(raddr.String())
+			s.conf.Blacklist.Add(host, 0)
+			return false, err
+		}
 	}
 
-	wrote = true
 	if n != buf.Len() {
 		err = io.ErrShortWrite
 	}
 
-	return
+	return true, err
 }
 
 func (s *Server) sendError(raddr net.Addr, tid, reason string, code int) {

@@ -33,6 +33,7 @@ const (
 const (
 	ExtendedMessageNameMetadata = "ut_metadata" // BEP 9
 	ExtendedMessageNamePex      = "ut_pex"      // BEP 11
+	ExtendedMessageNameI2P      = "i2p_dht"     // I2P DHT
 )
 
 // Predefine some "ut_metadata" extended message types.
@@ -108,6 +109,47 @@ func (ehm ExtendedHandshakeMsg) Encode() (b []byte, err error) {
 	buf := bytes.NewBuffer(make([]byte, 0, 128))
 	if err = bencode.NewEncoder(buf).Encode(ehm); err != nil {
 		b = buf.Bytes()
+	}
+	return
+}
+
+// I2PDHTExtendedMsg represents the "i2p_dht" extended message
+type I2PDHTExtendedMsg struct {
+	Port  int `bencode:"port"`
+	RPort int `bencode:"rport"`
+
+	Data []byte `bencode:"-"`
+}
+
+// EncodeToPayload encodes UtMetadataExtendedMsg to extended payload
+// and write the result into buf.
+func (um I2PDHTExtendedMsg) EncodeToPayload(buf *bytes.Buffer) (err error) {
+	buf.Grow(len(um.Data) + 50)
+	if err = bencode.NewEncoder(buf).Encode(um); err == nil {
+		_, err = buf.Write(um.Data)
+	}
+	return
+}
+
+// EncodeToBytes is equal to
+//
+//   buf := new(bytes.Buffer)
+//   err = um.EncodeToPayload(buf)
+//   return buf.Bytes(), err
+//
+func (um I2PDHTExtendedMsg) EncodeToBytes() (b []byte, err error) {
+	buf := bytes.NewBuffer(make([]byte, 0, 128))
+	if err = um.EncodeToPayload(buf); err == nil {
+		b = buf.Bytes()
+	}
+	return
+}
+
+// DecodeFromPayload decodes the extended payload to itself.
+func (um *I2PDHTExtendedMsg) DecodeFromPayload(b []byte) (err error) {
+	dec := bencode.NewDecoder(bytes.NewReader(b))
+	if err = dec.Decode(&um); err == nil {
+		um.Data = b[dec.BytesParsed():]
 	}
 	return
 }
