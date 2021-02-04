@@ -27,6 +27,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/eyedeekay/sam3/i2pkeys"
 	"github.com/xgfone/bt/bencode"
 	"github.com/xgfone/bt/krpc"
 	"github.com/xgfone/bt/metainfo"
@@ -56,7 +57,6 @@ type Result struct {
 	// Addr is the address of the peer where the request is sent to.
 	//
 	// Notice: it may be nil for "get_peers" request.
-	//Addr *net.UDPAddr
 	Addr net.Addr
 
 	// For Error
@@ -223,10 +223,12 @@ type Server struct {
 	conn net.PacketConn
 	once sync.Once
 
-	ipv4 bool
-	ipv6 bool
-	i2p  bool
-	want []krpc.Want
+	ipv4    bool
+	ipv6    bool
+	i2p     bool
+	i2pkeys i2pkeys.I2PKeys
+	rawConn net.PacketConn
+	want    []krpc.Want
 
 	peerManager        PeerManager
 	routingTable4      *routingTable
@@ -244,7 +246,7 @@ func SplitHostPort(raddr net.Addr) (string, int) {
 }
 
 // NewServer returns a new DHT server.
-func NewServer(conn net.PacketConn, config ...Config) *Server {
+func NewServer(conn net.PacketConn, raw net.PacketConn, config ...Config) *Server {
 	var conf Config
 	conf.set(config...)
 
@@ -279,7 +281,6 @@ func NewServer(conn net.PacketConn, config ...Config) *Server {
 			i2p = true
 			want = append(want, krpc.WantNodesInvisible)
 		}
-
 	}
 
 	s := &Server{
@@ -294,6 +295,9 @@ func NewServer(conn net.PacketConn, config ...Config) *Server {
 		tokenManager:       newTokenManager(),
 		tokenPeerManager:   newTokenPeerManager(),
 		transactionManager: newTransactionManager(),
+	}
+	if raw != nil {
+		s.rawConn = raw
 	}
 
 	s.routingTable4 = newRoutingTable(s, false, false)
