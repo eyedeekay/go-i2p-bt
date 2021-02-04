@@ -39,14 +39,14 @@ type Peer struct {
 // Addresses returns the list of the addresses that the peer listens on.
 func (p Peer) Addresses() (addrs []metainfo.Address, err error) {
 	if ip := net.ParseIP(p.IP); len(ip) != 0 {
-		return []metainfo.Address{{Addr: &net.IPAddr{IP: ip}, Port: p.Port}}, nil
+		return []metainfo.Address{{Addr: &net.UDPAddr{IP: ip, Port: int(p.Port)}}}, nil
 	}
 
 	ips, err := net.LookupIP(p.IP)
 	if _len := len(ips); err == nil && len(ips) != 0 {
 		addrs = make([]metainfo.Address, _len)
 		for i, ip := range ips {
-			addrs[i] = metainfo.Address{Addr: &net.IPAddr{IP: ip}, Port: p.Port}
+			addrs[i] = metainfo.Address{Addr: &net.UDPAddr{IP: ip, Port: int(p.Port)}}
 		}
 	}
 
@@ -76,7 +76,7 @@ func (ps *Peers) UnmarshalBencode(b []byte) (err error) {
 			if err = addr.UnmarshalBinary([]byte(vs[i : i+6])); err != nil {
 				return
 			}
-			peers = append(peers, Peer{IP: addr.String(), Port: addr.Port})
+			peers = append(peers, Peer{IP: addr.String(), Port: uint16(addr.Port())})
 		}
 
 		*ps = peers
@@ -169,7 +169,7 @@ func (ps *Peers6) UnmarshalBencode(b []byte) (err error) {
 		if err = addr.UnmarshalBinary([]byte(s[i : i+18])); err != nil {
 			return
 		}
-		peers = append(peers, Peer{IP: addr.String(), Port: addr.Port})
+		peers = append(peers, Peer{IP: addr.String(), Port: uint16(addr.Port())})
 	}
 
 	*ps = peers

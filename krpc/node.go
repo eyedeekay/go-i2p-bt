@@ -31,8 +31,8 @@ type Node struct {
 }
 
 // NewNode returns a new Node.
-func NewNode(id metainfo.Hash, ip net.Addr, port int) Node {
-	return Node{ID: id, Addr: metainfo.NewAddress(ip, uint16(port))}
+func NewNode(id metainfo.Hash, ip net.Addr, port uint16) Node {
+	return Node{ID: id, Addr: metainfo.NewAddress(ip, port)}
 }
 
 // NewNodeByUDPAddr returns a new Node with the id and the UDP address.

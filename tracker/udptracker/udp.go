@@ -182,7 +182,7 @@ func (r *AnnounceResponse) DecodeFrom(b []byte, ipv4 bool) {
 		ip := make(net.IP, iplen)
 		copy(ip, b[i-step:i-2])
 		port := binary.BigEndian.Uint16(b[i-2 : i])
-		r.Addresses = append(r.Addresses, metainfo.Address{Addr: &net.IPAddr{IP: ip}, Port: port})
+		r.Addresses = append(r.Addresses, metainfo.Address{Addr: &net.UDPAddr{IP: ip, Port: int(port)}})
 	}
 }
 

@@ -143,7 +143,7 @@ type Config struct {
 	//
 	// The default callback does noting.
 	//OnSearch func(infohash string, ip net.Addr, port uint16)
-	OnSearch func(infohash string, ip net.Addr, port uint16)
+	OnSearch func(infohash string, ip net.Addr) //, port uint16)
 
 	// OnTorrent is called when someone has the torrent infohash
 	// or someone has just downloaded the torrent infohash,
@@ -151,7 +151,7 @@ type Config struct {
 	//
 	// The default callback does noting.
 	//OnTorrent func(infohash string, ip net.Addr, port uint16)
-	OnTorrent func(infohash string, ip net.Addr, port uint16)
+	OnTorrent func(infohash string, ip net.Addr) //, port uint16)
 
 	// HandleInMessage is used to intercept the incoming DHT message.
 	// For example, you can debug the message as the log.
@@ -203,10 +203,10 @@ func (c *Config) set(conf ...Config) {
 		c.RespTimeout = time.Second * 10
 	}
 	if c.OnSearch == nil {
-		c.OnSearch = func(string, net.Addr, uint16) {}
+		c.OnSearch = func(string, net.Addr) {}
 	}
 	if c.OnTorrent == nil {
-		c.OnTorrent = func(string, net.Addr, uint16) {}
+		c.OnTorrent = func(string, net.Addr) {}
 	}
 	if c.HandleInMessage == nil {
 		c.HandleInMessage = c.in
@@ -255,7 +255,7 @@ func NewServer(conn net.PacketConn, config ...Config) *Server {
 			host, _, err := net.SplitHostPort(conn.LocalAddr().String())
 			if err != nil {
 				panic(err)
-			} else if ip := net.ParseIP(host); ipIsZero(&net.IPAddr{IP: ip}) {
+			} else if ip := net.ParseIP(host); ipIsZero(&net.UDPAddr{IP: ip}) {
 				conf.IPProtocols = []IPProtocolStack{IPv4Protocol, IPv6Protocol}
 			} else if ip.To4() != nil {
 				conf.IPProtocols = []IPProtocolStack{IPv4Protocol}
@@ -571,15 +571,13 @@ func (s *Server) handleQuery(raddr net.Addr, m krpc.Message) {
 
 		r.Token = s.tokenManager.Token(raddr)
 		s.reply(raddr, m.T, r)
-		_, port := SplitHostPort(raddr)
-		s.conf.OnSearch(m.A.InfoHash.HexString(), raddr, uint16(port))
+		s.conf.OnSearch(m.A.InfoHash.HexString(), raddr) //, uint16(port))
 	case queryMethodAnnouncePeer:
 		if s.tokenManager.Check(raddr, m.A.Token) {
 			return
 		}
 		s.reply(raddr, m.T, krpc.ResponseResult{})
-		_, port := SplitHostPort(raddr)
-		s.conf.OnTorrent(m.A.InfoHash.HexString(), raddr, m.A.GetPort(port))
+		s.conf.OnTorrent(m.A.InfoHash.HexString(), raddr) //, m.A.GetPort(port))
 	default:
 		s.sendError(raddr, m.T, "unknown query method", krpc.ErrorCodeMethodUnknown)
 	}
@@ -683,7 +681,7 @@ func (s *Server) onGetPeersResp(t *transaction, a net.Addr, m krpc.Message) {
 	if len(m.R.Values) > 0 {
 		t.Done(Result{Peers: m.R.Values})
 		for _, addr := range m.R.Values {
-			s.conf.OnTorrent(t.Arg.InfoHash.HexString(), addr, addr.Port)
+			s.conf.OnTorrent(t.Arg.InfoHash.HexString(), addr) //, uint16(addr.Port()))
 		}
 		return
 	}

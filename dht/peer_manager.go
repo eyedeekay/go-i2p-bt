@@ -87,7 +87,7 @@ func (tpm *tokenPeerManager) Set(id metainfo.Hash, addr net.Addr, token string) 
 	host, port := SplitHostPort(addr)
 	peers[addrkey] = peer{
 		ID:    id,
-		Addr:  &net.IPAddr{IP: net.ParseIP(host)},
+		Addr:  &net.UDPAddr{IP: net.ParseIP(host)},
 		Port:  uint16(port),
 		Token: token,
 		Time:  time.Now(),
