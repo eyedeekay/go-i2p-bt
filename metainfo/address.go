@@ -84,7 +84,7 @@ func Host(raddr net.Addr) string {
 func SplitHostPort(raddr net.Addr) (string, int) {
 	var host, port, err = net.SplitHostPort(raddr.String())
 	if err != nil {
-		host = net.ParseIP(raddr.String()).String()
+		//host = net.ParseIP(raddr.String()).String()
 		port = strings.Replace(raddr.String(), ":", "", -1)
 	}
 	if host == "" {
@@ -275,8 +275,12 @@ func (a Address) MarshalBinary() (data []byte, err error) {
 
 func (a *Address) decode(vs []interface{}) (err error) {
 	defer func() {
-		if e := recover(); e != nil {
-			err = e.(error)
+		switch e := recover().(type) {
+		case nil:
+		case error:
+			err = e
+		default:
+			err = fmt.Errorf("%v", e)
 		}
 	}()
 
@@ -406,8 +410,12 @@ func (a HostAddress) Equal(o HostAddress) bool {
 
 func (a *HostAddress) decode(vs []interface{}) (err error) {
 	defer func() {
-		if e := recover(); e != nil {
-			err = e.(error)
+		switch e := recover().(type) {
+		case nil:
+		case error:
+			err = e
+		default:
+			err = fmt.Errorf("%v", e)
 		}
 	}()
 

@@ -76,7 +76,7 @@ func newDHTServer(id metainfo.Hash, addr string, pm PeerManager) (s *Server, err
 	conn, err := net.ListenPacket("udp", addr)
 	if err == nil {
 		c := Config{ID: id, PeerManager: pm, OnSearch: onSearch, OnTorrent: onTorrent}
-		s = NewServer(conn, c)
+		s = NewServer(conn, conn, c)
 	}
 	return
 }
