@@ -55,7 +55,7 @@ type AnnounceRequest struct {
 	Uploaded   int64
 	Event      uint32
 
-	IP      net.IP
+	IP      net.Addr
 	Key     int32
 	NumWant int32 // -1 for default
 	Port    uint16
@@ -73,11 +73,11 @@ func (r *AnnounceRequest) DecodeFrom(b []byte, ipv4 bool) {
 	r.Event = binary.BigEndian.Uint32(b[64:68])
 
 	if ipv4 {
-		r.IP = make(net.IP, net.IPv4len)
+		r.IP = make(net.Addr, net.Addrv4len)
 		copy(r.IP, b[68:72])
 		b = b[72:]
 	} else {
-		r.IP = make(net.IP, net.IPv6len)
+		r.IP = make(net.Addr, net.Addrv6len)
 		copy(r.IP, b[68:84])
 		b = b[84:]
 	}
@@ -154,16 +154,16 @@ func (r *AnnounceResponse) DecodeFrom(b []byte, ipv4 bool) {
 	r.Seeders = binary.BigEndian.Uint32(b[8:12])
 
 	b = b[12:]
-	iplen := net.IPv6len
+	iplen := net.Addrv6len
 	if ipv4 {
-		iplen = net.IPv4len
+		iplen = net.Addrv4len
 	}
 
 	_len := len(b)
 	step := iplen + 2
 	r.Addresses = make([]metainfo.Address, 0, _len/step)
 	for i := step; i <= _len; i += step {
-		ip := make(net.IP, iplen)
+		ip := make(net.Addr, iplen)
 		copy(ip, b[i-step:i-2])
 		port := binary.BigEndian.Uint16(b[i-2 : i])
 		r.Addresses = append(r.Addresses, metainfo.Address{IP: ip, Port: port})

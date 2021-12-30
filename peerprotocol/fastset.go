@@ -31,7 +31,7 @@ import (
 //   infohash: infohash of torrent.
 //
 // BEP 6
-func GenerateAllowedFastSet(set []uint32, sz uint32, ip net.IP, infohash metainfo.Hash) {
+func GenerateAllowedFastSet(set []uint32, sz uint32, ip net.Addr, infohash metainfo.Hash) {
 	if ipv4 := ip.To4(); ipv4 != nil {
 		ip = ipv4
 	}

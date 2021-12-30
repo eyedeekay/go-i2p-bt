@@ -52,7 +52,7 @@ type AnnounceRequest struct {
 	Left       int64  // Required, but default: 0, which should be only used for test or last.
 	Event      uint32 // Required, but default: 0
 
-	IP      net.IP // Optional
+	IP      net.Addr // Optional
 	Key     int32  // Optional
 	NumWant int32  // Optional, BEP 15: -1 for default. But we use 0 as default.
 	Port    uint16 // Optional

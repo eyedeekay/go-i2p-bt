@@ -30,7 +30,7 @@ type PeerManager interface {
 
 type peer struct {
 	ID    metainfo.Hash
-	IP    net.IP
+	IP    net.Addr
 	Port  uint16
 	Token string
 	Time  time.Time

@@ -23,7 +23,22 @@ import (
 	"strconv"
 
 	"github.com/xgfone/bt/bencode"
+	"github.com/eyedeekay/sam3/i2pkeys"
 )
+
+func to4(ip net.Addr) (net.IP, net.Addr) {
+	switch v := ip.(type) {
+		case *net.IPAddr:
+			return v.IP.To4(), v
+		case *i2pkeys.I2PAddr:
+			return net.ParseIP(""), nil
+		case *net.TCPAddr:
+			return v.IP.To4(), v
+		case *net.UDPAddr:
+			return v.IP.To4(), v
+	}
+	return net.ParseIP(""), nil
+}
 
 // ErrInvalidAddr is returned when the compact address is invalid.
 var ErrInvalidAddr = fmt.Errorf("invalid compact information of ip and port")
@@ -31,16 +46,16 @@ var ErrInvalidAddr = fmt.Errorf("invalid compact information of ip and port")
 // Address represents a client/server listening on a UDP port implementing
 // the DHT protocol.
 type Address struct {
-	IP   net.IP // For IPv4, its length must be 4.
-	Port uint16
+	IP   net.Addr // For IPv4, its length must be 4.
+//	Port uint16
 }
 
 // NewAddress returns a new Address.
-func NewAddress(ip net.IP, port uint16) Address {
-	if ipv4 := ip.To4(); len(ipv4) > 0 {
-		ip = ipv4
+func NewAddress(ip net.Addr, port uint16) Address {
+	if ipv4, ad := to4(ip); len(ipv4) > 0 {
+		ip = ad
 	}
-	return Address{IP: ip, Port: port}
+	return Address{IP: ip}
 }
 
 // NewAddressFromString returns a new Address by the address string.
@@ -72,10 +87,10 @@ func NewAddressesFromString(s string) (addrs []Address, err error) {
 
 	addrs = make([]Address, len(ips))
 	for i, ip := range ips {
-		if ipv4 := ip.To4(); len(ipv4) != 0 {
-			addrs[i] = Address{IP: ipv4, Port: port}
+		if ipv4, ad := to4(&net.IPAddr{IP:ip}); len(ipv4) != 0 {
+			addrs[i] = Address{IP: ad}
 		} else {
-			addrs[i] = Address{IP: ip, Port: port}
+			addrs[i] = Address{IP: ad}
 		}
 	}
 
@@ -94,7 +109,7 @@ func (a *Address) FromString(addr string) (err error) {
 		if err != nil {
 			return fmt.Errorf("invalid address '%s': %s", addr, err)
 		}
-		a.Port = uint16(v)
+//		a.Port = uint16(v)
 	}
 
 	ips, err := net.LookupIP(host)
@@ -104,9 +119,9 @@ func (a *Address) FromString(addr string) (err error) {
 		return fmt.Errorf("the domain '%s' has no ips", host)
 	}
 
-	a.IP = ips[0]
-	if ip := a.IP.To4(); len(ip) > 0 {
-		a.IP = ip
+	a.IP = &net.IPAddr{IP:ips[0]}
+	if ip, ad := to4(a.IP); len(ip) > 0 {
+		a.IP = ad
 	}
 
 	return
@@ -114,9 +129,9 @@ func (a *Address) FromString(addr string) (err error) {
 
 // FromUDPAddr sets the ip from net.UDPAddr.
 func (a *Address) FromUDPAddr(ua *net.UDPAddr) {
-	a.Port = uint16(ua.Port)
-	a.IP = ua.IP
-	if ipv4 := a.IP.To4(); len(ipv4) != 0 {
+//	a.Port = uint16(ua.Port)
+	a.IP = &net.IPAddr{ua.IP}
+	if ipv4 := to4(&net.IPAddr{a.IP}); len(ipv4) != 0 {
 		a.IP = ipv4
 	}
 }
@@ -143,7 +158,7 @@ func (a Address) Equal(o Address) bool {
 }
 
 // HasIPAndPort reports whether the current node has the ip and the port.
-func (a Address) HasIPAndPort(ip net.IP, port uint16) bool {
+func (a Address) HasIPAndPort(ip net.Addr, port uint16) bool {
 	return port == a.Port && a.IP.Equal(ip)
 }
 
@@ -162,12 +177,12 @@ func (a Address) WriteBinary(w io.Writer) (m int, err error) {
 func (a *Address) UnmarshalBinary(b []byte) (err error) {
 	_len := len(b) - 2
 	switch _len {
-	case net.IPv4len, net.IPv6len:
+	case net.Addrv4len, net.Addrv6len:
 	default:
 		return ErrInvalidAddr
 	}
 
-	a.IP = make(net.IP, _len)
+	a.IP = make(net.Addr, _len)
 	copy(a.IP, b[:_len])
 	a.Port = binary.BigEndian.Uint16(b[_len:])
 	return
@@ -197,7 +212,7 @@ func (a *Address) decode(vs []interface{}) (err error) {
 	host := vs[0].(string)
 	if a.IP = net.ParseIP(host); len(a.IP) == 0 {
 		return ErrInvalidAddr
-	} else if ip := a.IP.To4(); len(ip) != 0 {
+	} else if ip := to4(a.IP); len(ip) != 0 {
 		a.IP = ip
 	}
 
@@ -246,7 +261,7 @@ type HostAddress struct {
 
 // NewHostAddress returns a new host addrress.
 func NewHostAddress(host string, port uint16) HostAddress {
-	return HostAddress{Host: host, Port: port}
+	return HostAddress{Host: host}
 }
 
 // NewHostAddressFromString returns a new host address by the string.
