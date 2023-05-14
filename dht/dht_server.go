@@ -1,4 +1,4 @@
-// Copyright 2020 xgfone
+// Copyright 2020 xgfone, 2023 idk
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,10 +25,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/xgfone/bt/bencode"
-	"github.com/xgfone/bt/krpc"
-	"github.com/xgfone/bt/metainfo"
-	"github.com/xgfone/bt/utils"
+	"github.com/eyedeekay/go-i2p-bt/bencode"
+	"github.com/eyedeekay/go-i2p-bt/krpc"
+	"github.com/eyedeekay/go-i2p-bt/metainfo"
+	"github.com/eyedeekay/go-i2p-bt/utils"
 )
 
 const (
@@ -44,6 +44,7 @@ var errUnsupportedIPProtocol = fmt.Errorf("unsupported ip protocol")
 const (
 	IPv4Protocol IPProtocolStack = 4
 	IPv6Protocol IPProtocolStack = 6
+	I2PBProtocol IPProtocolStack = 8
 )
 
 // IPProtocolStack represents the ip protocol stack, such as IPv4 or IPv6
@@ -220,6 +221,7 @@ type Server struct {
 
 	ipv4 bool
 	ipv6 bool
+	i2p  bool
 	want []krpc.Want
 
 	peerManager        PeerManager
@@ -239,7 +241,9 @@ func NewServer(conn net.PacketConn, config ...Config) *Server {
 		host, _, err := net.SplitHostPort(conn.LocalAddr().String())
 		if err != nil {
 			panic(err)
-		} else if ip := net.ParseIP(host); utils.IpIsZero(ip) {
+		} else if ip := net.ParseIP(host); ip == nil {
+			conf.IPProtocols = []IPProtocolStack{I2PBProtocol}
+		} else if utils.IpIsZero(ip) {
 			conf.IPProtocols = []IPProtocolStack{IPv4Protocol, IPv6Protocol}
 		} else if ip.To4() != nil {
 			conf.IPProtocols = []IPProtocolStack{IPv4Protocol}
