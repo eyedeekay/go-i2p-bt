@@ -1,6 +1,6 @@
-module github.com/xgfone/bt
+module github.com/eyedeekay/go-i2p-bt
 
-go 1.11
+go 1.19
 
 require (
 	github.com/eyedeekay/i2pkeys v0.33.0
