@@ -43,15 +43,15 @@ const (
 )
 
 // CompactIP is used to handle the compact ipv4 or ipv6.
-type CompactIP net.IP
+type CompactIP net.Addr
 
 func (ci CompactIP) String() string {
-	return net.IP(ci).String()
+	return net.Addr(ci).String()
 }
 
 // MarshalBencode implements the interface bencode.Marshaler.
 func (ci CompactIP) MarshalBencode() ([]byte, error) {
-	ip := net.IP(ci)
+	ip := net.Addr(ci)
 	if ipv4 := ip.To4(); len(ipv4) != 0 {
 		ip = ipv4
 	}
@@ -60,13 +60,13 @@ func (ci CompactIP) MarshalBencode() ([]byte, error) {
 
 // UnmarshalBencode implements the interface bencode.Unmarshaler.
 func (ci *CompactIP) UnmarshalBencode(b []byte) (err error) {
-	var ip net.IP
+	var ip net.Addr
 	if err = bencode.DecodeBytes(b, &ip); err != nil {
 		return
 	}
 
 	switch len(ip) {
-	case net.IPv4len, net.IPv6len:
+	case net.Addrv4len, net.Addrv6len:
 	default:
 		return errInvalidIP
 	}
@@ -91,7 +91,7 @@ type ExtendedHandshakeMsg struct {
 	// Port is the local client port, which is redundant and no need
 	// for the receiving side of the connection to send this.
 	Port   uint16    `bencode:"p,omitempty"`      // BEP 10
-	IPv6   net.IP    `bencode:"ipv6,omitempty"`   // BEP 10
+	IPv6   net.Addr    `bencode:"ipv6,omitempty"`   // BEP 10
 	IPv4   CompactIP `bencode:"ipv4,omitempty"`   // BEP 10
 	YourIP CompactIP `bencode:"yourip,omitempty"` // BEP 10
 

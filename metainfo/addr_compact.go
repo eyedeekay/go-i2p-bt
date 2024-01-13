@@ -32,33 +32,33 @@ import (
 //
 // See http://bittorrent.org/beps/bep_0005.html.
 type CompactAddr struct {
-	IP   net.IP // For IPv4, its length must be 4.
+	IP   net.Addr // For IPv4, its length must be 4.
 	Port uint16
 }
 
 // NewCompactAddr returns a new compact Addr with ip and port.
-func NewCompactAddr(ip net.IP, port uint16) CompactAddr {
+func NewCompactAddr(ip net.Addr, port uint16) CompactAddr {
 	return CompactAddr{IP: ip, Port: port}
 }
 
 // NewCompactAddrFromUDPAddr converts *net.UDPAddr to a new CompactAddr.
 func NewCompactAddrFromUDPAddr(ua *net.UDPAddr) CompactAddr {
-	return CompactAddr{IP: ua.IP, Port: uint16(ua.Port)}
+	return CompactAddr{IP: ua, Port: uint16(ua.Port)}
 }
 
 // Valid reports whether the addr is valid.
 func (a CompactAddr) Valid() bool {
-	return len(a.IP) > 0 && a.Port > 0
+	return len(a.IP.String()) > 0 && a.Port > 0
 }
 
 // Equal reports whether a is equal to o.
 func (a CompactAddr) Equal(o CompactAddr) bool {
-	return a.Port == o.Port && a.IP.Equal(o.IP)
+	return a.Port == o.Port && a.IP.String() == o.IP.String()
 }
 
 // UDPAddr converts itself to *net.Addr.
 func (a CompactAddr) UDPAddr() *net.UDPAddr {
-	return &net.UDPAddr{IP: a.IP, Port: int(a.Port)}
+	return &net.UDPAddr{IP: net.IP(a.IP.String()), Port: int(a.Port)}
 }
 
 var _ net.Addr = CompactAddr{}
@@ -78,7 +78,7 @@ func (a CompactAddr) String() string {
 // WriteBinary is the same as MarshalBinary, but writes the result into w
 // instead of returning.
 func (a CompactAddr) WriteBinary(w io.Writer) (n int, err error) {
-	if n, err = w.Write(a.IP); err == nil {
+	if n, err = w.Write([]byte(a.IP.String())); err == nil {
 		if err = binary.Write(w, binary.BigEndian, a.Port); err == nil {
 			n += 2
 		}
@@ -110,8 +110,9 @@ func (a *CompactAddr) UnmarshalBinary(data []byte) error {
 		return errors.New("invalid compact ip-address/port info")
 	}
 
-	a.IP = make(net.IP, _len)
-	copy(a.IP, data[:_len])
+	IP := make(net.IP, _len)
+	copy(IP, data[:_len])
+	a.IP = &net.IPAddr{IP: IP} 
 	a.Port = binary.BigEndian.Uint16(data[_len:])
 	return nil
 }
@@ -155,7 +156,7 @@ func (cas CompactIPv4Addrs) MarshalBinary() ([]byte, error) {
 	buf := bytes.NewBuffer(nil)
 	buf.Grow(6 * len(cas))
 	for _, addr := range cas {
-		if addr.IP = addr.IP.To4(); len(addr.IP) == 0 {
+		if IP := net.IP(addr.IP.String()).To4(); len(IP) == 0 {
 			continue
 		}
 
@@ -222,7 +223,10 @@ func (cas CompactIPv6Addrs) MarshalBinary() ([]byte, error) {
 	buf := bytes.NewBuffer(nil)
 	buf.Grow(18 * len(cas))
 	for _, addr := range cas {
-		addr.IP = addr.IP.To16()
+		IP := net.IP(addr.IP.String()).To16()
+		if len(IP) == 0 {
+			continue
+		}
 		if n, err := addr.WriteBinary(buf); err != nil {
 			return nil, err
 		} else if n != 18 {

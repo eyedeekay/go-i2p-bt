@@ -149,9 +149,9 @@ func (r *AnnounceResponse) DecodeFrom(b []byte, ipv4 bool) {
 	r.Seeders = binary.BigEndian.Uint32(b[8:12]) // 4: 16 - 20
 
 	b = b[12:] // N*(6|18): 20 -
-	iplen := net.IPv6len
+	iplen := net.Addrv6len
 	if ipv4 {
-		iplen = net.IPv4len
+		iplen = net.Addrv4len
 	}
 
 	_len := len(b)

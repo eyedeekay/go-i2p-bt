@@ -907,14 +907,14 @@ func (s *Server) onFindNodeResp(t *transaction, _ krpc.Addr, m krpc.Message) {
 	}
 }
 
-func isIPv6(ip net.IP) bool {
+func isIPv6(ip net.Addr) bool {
 	if ip.To4() == nil {
 		return true
 	}
 	return false
 }
 
-func ipIsZero(ip net.IP) bool {
+func ipIsZero(ip net.Addr) bool {
 	for _, b := range ip {
 		if b != 0 {
 			return false

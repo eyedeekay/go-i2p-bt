@@ -32,7 +32,7 @@ import (
 //
 // See http://bittorrent.org/beps/bep_0005.html.
 type Addr struct {
-	IP   net.IP // For IPv4, its length must be 4.
+	IP   net.Addr // For IPv4, its length must be 4.
 	Port uint16
 
 	// The original network address, which is only used by the DHT server.
@@ -76,7 +76,7 @@ func ParseAddrs(s string) (addrs []Addr, err error) {
 }
 
 // NewAddr returns a new Addr with ip and port.
-func NewAddr(ip net.IP, port uint16) Addr {
+func NewAddr(ip net.Addr, port uint16) Addr {
 	return Addr{IP: ip, Port: port}
 }
 
@@ -144,12 +144,12 @@ func (a Addr) MarshalBinary() (data []byte, err error) {
 func (a *Addr) UnmarshalBinary(data []byte) error {
 	_len := len(data) - 2
 	switch _len {
-	case net.IPv4len, net.IPv6len:
+	case net.Addrv4len, net.Addrv6len:
 	default:
 		return errors.New("invalid compact ip-address/port info")
 	}
 
-	a.IP = make(net.IP, _len)
+	a.IP = make(net.Addr, _len)
 	copy(a.IP, data[:_len])
 	a.Port = binary.BigEndian.Uint16(data[_len:])
 	return nil
