@@ -1,4 +1,4 @@
-module github.com/eyedeekay/go-i2p-bt
+module github.com/go-i2p/go-i2p-bt
 
 go 1.21.5
 
