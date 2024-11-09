@@ -19,8 +19,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/eyedeekay/go-i2p-bt/metainfo"
-	"github.com/eyedeekay/go-i2p-bt/utils"
+	"github.com/go-i2p/go-i2p-bt/metainfo"
+	"github.com/go-i2p/go-i2p-bt/utils"
 )
 
 // PeerManager is used to manage the peers.

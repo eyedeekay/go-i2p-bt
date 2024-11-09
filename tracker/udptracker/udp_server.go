@@ -24,7 +24,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/eyedeekay/go-i2p-bt/metainfo"
+	"github.com/go-i2p/go-i2p-bt/metainfo"
 )
 
 // ServerHandler is used to handle the request from the client.

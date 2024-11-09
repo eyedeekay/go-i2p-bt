@@ -20,8 +20,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/eyedeekay/go-i2p-bt/bencode"
-	"github.com/eyedeekay/go-i2p-bt/utils"
+	"github.com/go-i2p/go-i2p-bt/bencode"
+	"github.com/go-i2p/go-i2p-bt/utils"
 )
 
 // Bytes is the []byte type.

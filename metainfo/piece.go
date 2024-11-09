@@ -21,7 +21,7 @@ import (
 	"io"
 	"sort"
 
-	"github.com/eyedeekay/go-i2p-bt/utils"
+	"github.com/go-i2p/go-i2p-bt/utils"
 )
 
 // Predefine some sizes of the pieces.

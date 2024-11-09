@@ -15,8 +15,8 @@
 package blockdownload
 
 import (
-	"github.com/eyedeekay/go-i2p-bt/metainfo"
-	pp "github.com/eyedeekay/go-i2p-bt/peerprotocol"
+	"github.com/go-i2p/go-i2p-bt/metainfo"
+	pp "github.com/go-i2p/go-i2p-bt/peerprotocol"
 )
 
 // BlockDownloadHandler is used to downloads the files in the torrent file.

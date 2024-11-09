@@ -17,7 +17,7 @@ package krpc
 import (
 	"testing"
 
-	"github.com/eyedeekay/go-i2p-bt/bencode"
+	"github.com/go-i2p/go-i2p-bt/bencode"
 )
 
 func TestMessage(t *testing.T) {

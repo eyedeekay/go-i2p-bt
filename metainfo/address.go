@@ -23,9 +23,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/eyedeekay/i2pkeys"
-	"github.com/eyedeekay/go-i2p-bt/bencode"
-	"github.com/eyedeekay/go-i2p-bt/utils"
+	"github.com/go-i2p/i2pkeys"
+	"github.com/go-i2p/go-i2p-bt/bencode"
+	"github.com/go-i2p/go-i2p-bt/utils"
 )
 
 // ErrInvalidAddr is returned when the compact address is invalid.

@@ -26,9 +26,9 @@ import (
 	"net/http"
 	"net/url"
 
-	"github.com/eyedeekay/go-i2p-bt/metainfo"
-	"github.com/eyedeekay/go-i2p-bt/tracker/httptracker"
-	"github.com/eyedeekay/go-i2p-bt/tracker/udptracker"
+	"github.com/go-i2p/go-i2p-bt/metainfo"
+	"github.com/go-i2p/go-i2p-bt/tracker/httptracker"
+	"github.com/go-i2p/go-i2p-bt/tracker/udptracker"
 )
 
 // Predefine some announce events.

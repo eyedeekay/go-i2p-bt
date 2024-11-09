@@ -19,7 +19,7 @@ import (
 	"log"
 	"testing"
 
-	"github.com/eyedeekay/sam3"
+	"github.com/go-i2p/sam3"
 )
 
 func TestCompactIP(t *testing.T) {

@@ -18,7 +18,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/eyedeekay/go-i2p-bt/metainfo"
+	"github.com/go-i2p/go-i2p-bt/metainfo"
 )
 
 func TestHTTPAnnounceRequest(t *testing.T) {

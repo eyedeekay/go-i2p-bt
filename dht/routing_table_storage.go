@@ -17,8 +17,8 @@ package dht
 import (
 	"time"
 
-	"github.com/eyedeekay/go-i2p-bt/krpc"
-	"github.com/eyedeekay/go-i2p-bt/metainfo"
+	"github.com/go-i2p/go-i2p-bt/krpc"
+	"github.com/go-i2p/go-i2p-bt/metainfo"
 )
 
 // RoutingTableNode represents the node with last changed time in the routing table.

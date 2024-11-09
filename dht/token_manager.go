@@ -19,7 +19,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/eyedeekay/go-i2p-bt/utils"
+	"github.com/go-i2p/go-i2p-bt/utils"
 )
 
 // TokenManager is used to manage and validate the token.

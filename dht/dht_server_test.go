@@ -20,7 +20,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/eyedeekay/go-i2p-bt/metainfo"
+	"github.com/go-i2p/go-i2p-bt/metainfo"
 )
 
 type testPeerManager struct {

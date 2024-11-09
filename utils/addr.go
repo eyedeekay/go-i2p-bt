@@ -18,7 +18,7 @@ import (
 	"net"
 	"strconv"
 
-	"github.com/eyedeekay/i2pkeys"
+	"github.com/go-i2p/i2pkeys"
 )
 
 func NetIPAddr(a net.Addr) net.IP {
