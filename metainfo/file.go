@@ -41,23 +41,23 @@ func (f File) String() string {
 // Path returns the path of the current.
 func (f File) Path(info Info) string {
 	if info.IsDir() {
-		paths := make([]string, len(f.Paths)+1)
-		paths[0] = info.Name
-		copy(paths[1:], f.Paths)
-		return filepath.Join(paths...)
+		return filepath.Join(info.Name, filepath.Join(f.Paths...))
 	}
 	return info.Name
 }
 
 // PathWithPrefix returns the path of the current with the prefix directory.
 func (f File) PathWithPrefix(prefix string, info Info) string {
+	var path string
 	if info.IsDir() {
 		paths := make([]string, 0, len(f.Paths)+2)
 		paths = append(paths, prefix, info.Name)
 		paths = append(paths, f.Paths...)
-		return filepath.Join(paths...)
+		path = filepath.Join(paths...)
+	} else {
+		path = prefix // Corrected: Do not append info.Name again
 	}
-	return prefix // Corrected line: Do not append info.Name for single-file torrents
+	return path
 }
 
 // Offset returns the offset of the current file from the start.
