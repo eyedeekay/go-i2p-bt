@@ -14,6 +14,11 @@
 
 package peerprotocol
 
+import (
+	"github.com/go-i2p/go-i2p-bt/metainfo"
+	"log"
+)
+
 var _ Handler = NoopHandler{}
 var _ Bep3Handler = NoopBep3Handler{}
 var _ Bep5Handler = NoopBep5Handler{}
@@ -104,3 +109,46 @@ func (NoopBep10Handler) OnExtHandShake(*PeerConn) error { return nil }
 
 // OnPayload implements the interface Bep10Handler#OnPayload.
 func (NoopBep10Handler) OnPayload(*PeerConn, uint8, []byte) error { return nil }
+
+type MyPexHandler struct {
+	NoopHandler
+}
+
+func (h MyPexHandler) OnExtHandShake(pc *PeerConn) error {
+	log.Printf("Received extended handshake from %s. ut_pex ID: %d", pc.RemoteAddr().String(), pc.PEXID)
+	return nil
+}
+
+func (h MyPexHandler) OnPayload(pc *PeerConn, extid uint8, payload []byte) error {
+	if extid == pc.PEXID && pc.PEXID != 0 {
+		um, err := DecodePexMsg(payload)
+		if err != nil {
+			return err
+		}
+
+		addedPeers := parseCompactPeers(um.Added)
+		for _, addr := range addedPeers {
+			log.Printf("PEX: Learned new peer %s", addr.String())
+			// Add to known peers
+		}
+
+		droppedPeers := parseCompactPeers(um.Dropped)
+		for _, addr := range droppedPeers {
+			log.Printf("PEX: Peer dropped %s", addr.String())
+			// Remove from known peers
+		}
+	}
+	return nil
+}
+
+func parseCompactPeers(b []byte) []metainfo.Address {
+	var addrs []metainfo.Address
+	iplen := 6
+	for i := 0; i+iplen <= len(b); i += iplen {
+		var addr metainfo.Address
+		if err := addr.UnmarshalBinary(b[i : i+iplen]); err == nil {
+			addrs = append(addrs, addr)
+		}
+	}
+	return addrs
+}
