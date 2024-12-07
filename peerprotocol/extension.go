@@ -19,8 +19,8 @@ import (
 	"errors"
 	"net"
 
-	"github.com/go-i2p/i2pkeys"
 	"github.com/go-i2p/go-i2p-bt/bencode"
+	"github.com/go-i2p/i2pkeys"
 )
 
 var errInvalidIP = errors.New("invalid ipv4 or ipv6")
@@ -192,4 +192,25 @@ func (um *UtMetadataExtendedMsg) DecodeFromPayload(b []byte) (err error) {
 		um.Data = b[dec.BytesParsed():]
 	}
 	return
+}
+
+// UtPexMsg represents the "ut_pex" extended message payload (BEP 11).
+type UtPexMsg struct {
+	Added    []byte `bencode:"added,omitempty"`
+	AddedF   []byte `bencode:"added.f,omitempty"`
+	Dropped  []byte `bencode:"dropped,omitempty"`
+	Added6   []byte `bencode:"added6,omitempty"`
+	Added6F  []byte `bencode:"added6.f,omitempty"`
+	Dropped6 []byte `bencode:"dropped6,omitempty"`
+}
+
+// DecodePexMsg decodes a "ut_pex" message.
+func DecodePexMsg(b []byte) (um UtPexMsg, err error) {
+	err = bencode.DecodeBytes(b, &um)
+	return
+}
+
+// EncodePexMsg encodes a "ut_pex" message.
+func EncodePexMsg(um UtPexMsg) ([]byte, error) {
+	return bencode.EncodeBytes(um)
 }
