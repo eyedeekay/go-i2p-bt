@@ -662,61 +662,87 @@ func (s *Server) onPingResp(t *transaction, a net.Addr, m krpc.Message) {
 }
 
 func (s *Server) onGetPeersResp(t *transaction, a net.Addr, m krpc.Message) {
-	// Store the response node with the token.
+	s.storeTokenIfPresent(m, a)
+
+	if s.handlePeersIfFound(t, m) {
+		return
+	}
+
+	t.Done(Result{})
+
+	if !s.shouldContinueSearch(t) {
+		return
+	}
+
+	found, nodes, updatedVisited := s.processResponseNodes(t, m)
+	if found || len(nodes) == 0 {
+		return
+	}
+
+	s.continueRecursiveSearch(t, nodes, updatedVisited)
+}
+
+// storeTokenIfPresent stores the response node with the token if present.
+func (s *Server) storeTokenIfPresent(m krpc.Message, a net.Addr) {
 	if m.R.Token != "" {
 		s.tokenPeerManager.Set(m.R.ID, a, m.R.Token)
 	}
+}
 
-	// Get the peers.
+// handlePeersIfFound processes found peers and notifies callbacks.
+func (s *Server) handlePeersIfFound(t *transaction, m krpc.Message) bool {
 	if len(m.R.Values) > 0 {
 		t.Done(Result{Peers: m.R.Values})
 		for _, addr := range m.R.Values {
 			s.conf.OnTorrent(t.Arg.InfoHash.HexString(), addr.IP)
 		}
-		return
+		return true
 	}
+	return false
+}
 
-	// Terminate the transaction.
-	t.Done(Result{})
-
-	// Search the torrent infohash recursively.
+// shouldContinueSearch determines if recursive search should continue based on depth.
+func (s *Server) shouldContinueSearch(t *transaction) bool {
 	t.Depth--
-	if t.Depth < 1 {
-		return
-	}
+	return t.Depth >= 1
+}
 
-	var found bool
+// processResponseNodes processes IPv4 and IPv6 nodes from the response.
+func (s *Server) processResponseNodes(t *transaction, m krpc.Message) (found bool, nodes []krpc.Node, updatedVisited metainfo.Hashes) {
 	ids := t.Visited
-	nodes := make([]krpc.Node, 0, len(m.R.Nodes)+len(m.R.Nodes6))
-	for _, node := range m.R.Nodes {
-		if node.ID == t.Arg.InfoHash {
+	nodes = make([]krpc.Node, 0, len(m.R.Nodes)+len(m.R.Nodes6))
+
+	found = s.processNodeList(m.R.Nodes, t.Arg.InfoHash, ids, m.RO, &nodes, &ids)
+	if !found {
+		found = s.processNodeList(m.R.Nodes6, t.Arg.InfoHash, ids, m.RO, &nodes, &ids)
+	}
+
+	return found, nodes, ids
+}
+
+// processNodeList processes a list of nodes and updates the collection.
+func (s *Server) processNodeList(nodeList []krpc.Node, targetHash metainfo.Hash,
+	ids metainfo.Hashes, readOnly bool, nodes *[]krpc.Node, updatedIds *metainfo.Hashes) bool {
+	var found bool
+
+	for _, node := range nodeList {
+		if node.ID == targetHash {
 			found = true
 		}
 		if ids.Contains(node.ID) {
 			continue
 		}
-		if s.addNode2(node, m.RO) == NodeAdded {
-			nodes = append(nodes, node)
-			ids = append(ids, node.ID)
-		}
-	}
-	for _, node := range m.R.Nodes6 {
-		if node.ID == t.Arg.InfoHash {
-			found = true
-		}
-		if ids.Contains(node.ID) {
-			continue
-		}
-		if s.addNode2(node, m.RO) == NodeAdded {
-			nodes = append(nodes, node)
-			ids = append(ids, node.ID)
+		if s.addNode2(node, readOnly) == NodeAdded {
+			*nodes = append(*nodes, node)
+			*updatedIds = append(*updatedIds, node.ID)
 		}
 	}
 
-	if found || len(nodes) == 0 {
-		return
-	}
+	return found
+}
 
+// continueRecursiveSearch initiates get_peers requests to discovered nodes.
+func (s *Server) continueRecursiveSearch(t *transaction, nodes []krpc.Node, ids metainfo.Hashes) {
 	for _, node := range nodes {
 		s.getPeers(t.Arg.InfoHash, node.Addr, t.Depth, ids, t.Callback)
 	}
