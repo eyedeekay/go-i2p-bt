@@ -176,33 +176,63 @@ func (d *TorrentDownloader) worker() {
 	}
 }
 
+// download performs the torrent metadata download from a peer.
 func (d *TorrentDownloader) download(host string, port uint16,
 	peerID, infohash metainfo.Hash) (err error) {
-	addr := net.JoinHostPort(host, strconv.FormatUint(uint64(port), 10))
-	conn, err := pp.NewPeerConnByDial(addr, d.conf.ID, infohash, d.conf.DialTimeout)
+	conn, err := d.establishConnection(host, port, peerID, infohash)
 	if err != nil {
-		return fmt.Errorf("fail to dial to '%s': %s", addr, err)
+		return err
 	}
 	defer conn.Close()
 
+	if err = d.performExtendedHandshake(conn); err != nil {
+		return err
+	}
+
+	return d.processMetadataExchange(conn, host, port, infohash)
+}
+
+// establishConnection creates and validates a peer connection.
+func (d *TorrentDownloader) establishConnection(host string, port uint16,
+	peerID, infohash metainfo.Hash) (*pp.PeerConn, error) {
+	addr := net.JoinHostPort(host, strconv.FormatUint(uint64(port), 10))
+	conn, err := pp.NewPeerConnByDial(addr, d.conf.ID, infohash, d.conf.DialTimeout)
+	if err != nil {
+		return nil, fmt.Errorf("fail to dial to '%s': %s", addr, err)
+	}
+
 	conn.ExtBits = d.ebits
 	if err = conn.Handshake(); err != nil {
-		return
-	} else if !conn.PeerExtBits.IsSupportExtended() {
-		return fmt.Errorf("the remote peer '%s' does not support Extended", addr)
-	} else if !peerID.IsZero() && peerID != conn.PeerID {
-		return fmt.Errorf("inconsistent peer id '%s'", conn.PeerID.HexString())
+		conn.Close()
+		return nil, err
 	}
 
-	if err = conn.SendExtHandshakeMsg(d.ehmsg); err != nil {
-		return
+	if !conn.PeerExtBits.IsSupportExtended() {
+		conn.Close()
+		return nil, fmt.Errorf("the remote peer '%s' does not support Extended", addr)
 	}
 
+	if !peerID.IsZero() && peerID != conn.PeerID {
+		conn.Close()
+		return nil, fmt.Errorf("inconsistent peer id '%s'", conn.PeerID.HexString())
+	}
+
+	return conn, nil
+}
+
+// performExtendedHandshake sends the extended handshake message to the peer.
+func (d *TorrentDownloader) performExtendedHandshake(conn *pp.PeerConn) error {
+	return conn.SendExtHandshakeMsg(d.ehmsg)
+}
+
+// processMetadataExchange handles the main message loop for metadata exchange.
+func (d *TorrentDownloader) processMetadataExchange(conn *pp.PeerConn, host string, port uint16, infohash metainfo.Hash) error {
 	var pieces [][]byte
 	var piecesNum int
 	var metadataSize int
 	var utmetadataID uint8
 	var msg pp.Message
+	var err error
 
 	for {
 		if msg, err = conn.ReadMsg(); err != nil {
@@ -211,7 +241,7 @@ func (d *TorrentDownloader) download(host string, port uint16,
 
 		select {
 		case <-d.exit:
-			return
+			return nil
 		default:
 		}
 
@@ -219,85 +249,133 @@ func (d *TorrentDownloader) download(host string, port uint16,
 			continue
 		}
 
-		switch msg.Type {
-		case pp.MTypeExtended:
-		case pp.MTypePort:
-			if d.ondht != nil {
-				d.ondht(host, msg.Port)
-			}
-			continue
-		default:
-			continue
+		if err = d.handleMessage(msg, host, &pieces, &piecesNum, &metadataSize, &utmetadataID, conn, port, infohash); err != nil {
+			return err
 		}
 
-		switch msg.ExtendedID {
-		case pp.ExtendedIDHandshake:
-			if utmetadataID > 0 {
-				return fmt.Errorf("rehandshake from the peer '%s'", conn.RemoteAddr().String())
-			}
-
-			var ehmsg pp.ExtendedHandshakeMsg
-			if err = ehmsg.Decode(msg.ExtendedPayload); err != nil {
-				return
-			}
-
-			utmetadataID = ehmsg.M[pp.ExtendedMessageNameMetadata]
-			if utmetadataID == 0 {
-				return errors.New(`the peer does not support "ut_metadata"`)
-			}
-
-			metadataSize = ehmsg.MetadataSize
-			piecesNum = metadataSize / BlockSize
-			if metadataSize%BlockSize != 0 {
-				piecesNum++
-			}
-
-			pieces = make([][]byte, piecesNum)
-			go d.requestPieces(conn, utmetadataID, piecesNum)
-		case 1:
-			if pieces == nil {
-				return
-			}
-
-			var utmsg pp.UtMetadataExtendedMsg
-			if err = utmsg.DecodeFromPayload(msg.ExtendedPayload); err != nil {
-				return
-			}
-
-			if utmsg.MsgType != pp.UtMetadataExtendedMsgTypeData {
-				continue
-			}
-
-			pieceLen := len(utmsg.Data)
-			if (utmsg.Piece != piecesNum-1 && pieceLen != BlockSize) ||
-				(utmsg.Piece == piecesNum-1 && pieceLen != metadataSize%BlockSize) {
-				return
-			}
-			pieces[utmsg.Piece] = utmsg.Data
-
-			finish := true
-			for _, piece := range pieces {
-				if len(piece) == 0 {
-					finish = false
-					break
-				}
-			}
-
-			if finish {
-				metadataInfo := bytes.Join(pieces, nil)
-				if infohash == metainfo.Hash(sha1.Sum(metadataInfo)) {
-					d.responses <- TorrentResponse{
-						Host:      host,
-						Port:      port,
-						PeerID:    conn.PeerID,
-						InfoHash:  infohash,
-						InfoBytes: metadataInfo,
-					}
-				}
-				return
-			}
+		if pieces != nil && d.isMetadataComplete(pieces) {
+			return d.finalizeMetadata(pieces, host, port, conn.PeerID, infohash)
 		}
 	}
+}
+
+// handleMessage processes individual messages during metadata exchange.
+func (d *TorrentDownloader) handleMessage(msg pp.Message, host string, pieces *[][]byte, piecesNum *int, metadataSize *int, utmetadataID *uint8, conn *pp.PeerConn, port uint16, infohash metainfo.Hash) error {
+	switch msg.Type {
+	case pp.MTypeExtended:
+		return d.handleExtendedMessage(msg, pieces, piecesNum, metadataSize, utmetadataID, conn)
+	case pp.MTypePort:
+		if d.ondht != nil {
+			d.ondht(host, msg.Port)
+		}
+		return nil
+	default:
+		return nil
+	}
+}
+
+// handleExtendedMessage processes extended protocol messages.
+func (d *TorrentDownloader) handleExtendedMessage(msg pp.Message, pieces *[][]byte, piecesNum *int, metadataSize *int, utmetadataID *uint8, conn *pp.PeerConn) error {
+	switch msg.ExtendedID {
+	case pp.ExtendedIDHandshake:
+		return d.processExtendedHandshake(msg, pieces, piecesNum, metadataSize, utmetadataID, conn)
+	case 1:
+		return d.processMetadataPiece(msg, *pieces, *piecesNum, *metadataSize)
+	default:
+		return nil
+	}
+}
+
+// processExtendedHandshake handles the extended handshake response.
+func (d *TorrentDownloader) processExtendedHandshake(msg pp.Message, pieces *[][]byte, piecesNum *int, metadataSize *int, utmetadataID *uint8, conn *pp.PeerConn) error {
+	if *utmetadataID > 0 {
+		return fmt.Errorf("rehandshake from the peer '%s'", conn.RemoteAddr().String())
+	}
+
+	var ehmsg pp.ExtendedHandshakeMsg
+	if err := ehmsg.Decode(msg.ExtendedPayload); err != nil {
+		return err
+	}
+
+	*utmetadataID = ehmsg.M[pp.ExtendedMessageNameMetadata]
+	if *utmetadataID == 0 {
+		return errors.New(`the peer does not support "ut_metadata"`)
+	}
+
+	*metadataSize = ehmsg.MetadataSize
+	*piecesNum = *metadataSize / BlockSize
+	if *metadataSize%BlockSize != 0 {
+		(*piecesNum)++
+	}
+
+	*pieces = make([][]byte, *piecesNum)
+	go d.requestPieces(conn, *utmetadataID, *piecesNum)
+	return nil
+}
+
+// processMetadataPiece handles incoming metadata piece data.
+func (d *TorrentDownloader) processMetadataPiece(msg pp.Message, pieces [][]byte, piecesNum int, metadataSize int) error {
+	if pieces == nil {
+		return nil
+	}
+
+	var utmsg pp.UtMetadataExtendedMsg
+	if err := utmsg.DecodeFromPayload(msg.ExtendedPayload); err != nil {
+		return err
+	}
+
+	if utmsg.MsgType != pp.UtMetadataExtendedMsgTypeData {
+		return nil
+	}
+
+	if err := d.validatePieceData(utmsg, piecesNum, metadataSize); err != nil {
+		return err
+	}
+
+	pieces[utmsg.Piece] = utmsg.Data
+	return nil
+}
+
+// validatePieceData validates the received metadata piece data.
+func (d *TorrentDownloader) validatePieceData(utmsg pp.UtMetadataExtendedMsg, piecesNum int, metadataSize int) error {
+	pieceLen := len(utmsg.Data)
+	if utmsg.Piece == piecesNum-1 {
+		expectedLen := metadataSize % BlockSize
+		if expectedLen == 0 {
+			expectedLen = BlockSize
+		}
+		if pieceLen != expectedLen {
+			return fmt.Errorf("invalid final piece length: expected %d, got %d", expectedLen, pieceLen)
+		}
+	} else if pieceLen != BlockSize {
+		return fmt.Errorf("invalid piece length: expected %d, got %d", BlockSize, pieceLen)
+	}
+	return nil
+}
+
+// isMetadataComplete checks if all metadata pieces have been received.
+func (d *TorrentDownloader) isMetadataComplete(pieces [][]byte) bool {
+	for _, piece := range pieces {
+		if len(piece) == 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// finalizeMetadata assembles the complete metadata and sends the response.
+func (d *TorrentDownloader) finalizeMetadata(pieces [][]byte, host string, port uint16, peerID, infohash metainfo.Hash) error {
+	metadataInfo := bytes.Join(pieces, nil)
+	if infohash == metainfo.Hash(sha1.Sum(metadataInfo)) {
+		d.responses <- TorrentResponse{
+			Host:      host,
+			Port:      port,
+			PeerID:    peerID,
+			InfoHash:  infohash,
+			InfoBytes: metadataInfo,
+		}
+	}
+	return nil
 }
 
 func (d *TorrentDownloader) requestPieces(conn *pp.PeerConn, utMetadataID uint8, piecesNum int) {
