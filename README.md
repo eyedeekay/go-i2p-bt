@@ -1,21 +1,21 @@
-# BT - Another Implementation For Golang [![Build Status](https://github.com/xgfone/bt/actions/workflows/go.yml/badge.svg)](https://github.com/xgfone/bt/actions/workflows/go.yml) [![GoDoc](https://pkg.go.dev/badge/github.com/xgfone/bt)](https://pkg.go.dev/github.com/xgfone/bt) [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg?style=flat-square)](https://raw.githubusercontent.com/xgfone/bt/master/LICENSE)
+# BT - Another Implementation For Golang [![Build Status](https://github.com/go-i2p/bt/actions/workflows/go.yml/badge.svg)](https://github.com/go-i2p/bt/actions/workflows/go.yml) [![GoDoc](https://pkg.go.dev/badge/github.com/go-i2p/bt)](https://pkg.go.dev/github.com/go-i2p/bt) [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg?style=flat-square)](https://raw.githubusercontent.com/go-i2p/bt/master/LICENSE)
 
 A pure golang implementation of [BitTorrent](http://bittorrent.org/beps/bep_0000.html) library, which is inspired by [dht](https://github.com/shiyanhui/dht) and [torrent](https://github.com/anacrolix/torrent).
 
 
 ## Install
 ```shell
-$ go get -u github.com/xgfone/bt
+$ go get -u github.com/go-i2p/bt
 ```
 
 
 ## Features
 
 - Support `Go1.9+`.
-- Support IPv4/IPv6.
+- Support I2P, IPv4/IPv6.
 - Multi-BEPs implementation.
 - Pure Go implementation without `CGO`.
-- Only library without any denpendencies. For the command tools, see [bttools](https://github.com/xgfone/bttools).
+- Only library without any denpendencies. For the command tools, see [bttools](https://github.com/go-i2p/bttools).
 
 
 ## The Implemented Specifications
@@ -39,7 +39,7 @@ $ go get -u github.com/xgfone/bt
 
 
 ## Example
-See [godoc](https://pkg.go.dev/github.com/xgfone/bt) or [bttools](https://github.com/xgfone/bttools).
+See [godoc](https://pkg.go.dev/github.com/go-i2p/bt) or [bttools](https://github.com/go-i2p/bttools).
 
 ### Example 1: Download the file from the remote peer
 
@@ -56,10 +56,10 @@ import (
 	"os"
 	"time"
 
-	"github.com/xgfone/bt/downloader"
-	"github.com/xgfone/bt/metainfo"
-	pp "github.com/xgfone/bt/peerprotocol"
-	"github.com/xgfone/bt/tracker"
+	"github.com/go-i2p/bt/downloader"
+	"github.com/go-i2p/bt/metainfo"
+	pp "github.com/go-i2p/bt/peerprotocol"
+	"github.com/go-i2p/bt/tracker"
 )
 
 var peeraddr string

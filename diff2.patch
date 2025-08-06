@@ -12,7 +12,7 @@ index 7ab53ff..19b7799 100644
  	"net"
  
 +	"github.com/eyedeekay/sam3/i2pkeys"
- 	"github.com/xgfone/bt/bencode"
+ 	"github.com/go-i2p/bt/bencode"
  )
  
 @@ -42,40 +45,83 @@ const (

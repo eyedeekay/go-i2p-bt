@@ -9,7 +9,7 @@ index 7ab53ff..02eb9e3 100644
 +	"log"
  	"net"
  
- 	"github.com/xgfone/bt/bencode"
+ 	"github.com/go-i2p/bt/bencode"
 @@ -43,39 +44,58 @@ const (
  )
  
