@@ -70,28 +70,19 @@ func isNilValue(v reflect.Value) bool {
 func encodeValue(w io.Writer, val reflect.Value) error {
 	marshaler, textMarshaler, v := indirectEncodeValue(val)
 
-	// marshal a type using the Marshaler type
-	// if it implements that interface.
-	if marshaler != nil {
-		bytes, err := marshaler.MarshalBencode()
-		if err != nil {
-			return err
-		}
-
-		_, err = w.Write(bytes)
+	// Handle marshaler interfaces
+	if err := encodeMarshalerType(w, marshaler); err != nil {
 		return err
 	}
+	if marshaler != nil {
+		return nil
+	}
 
-	// marshal a type using the TextMarshaler type
-	// if it implements that interface.
-	if textMarshaler != nil {
-		bytes, err := textMarshaler.MarshalText()
-		if err != nil {
-			return err
-		}
-
-		_, err = fmt.Fprintf(w, "%d:%s", len(bytes), bytes)
+	if err := encodeTextMarshalerType(w, textMarshaler); err != nil {
 		return err
+	}
+	if textMarshaler != nil {
+		return nil
 	}
 
 	// if indirection returns us an invalid value that means there was a nil
@@ -106,6 +97,60 @@ func encodeValue(w io.Writer, val reflect.Value) error {
 		return err
 	}
 
+	switch v.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
+		reflect.Bool:
+		return encodeNumericTypes(w, v)
+
+	case reflect.String:
+		return encodeStringType(w, v)
+
+	case reflect.Slice, reflect.Array:
+		return encodeSliceArrayType(w, val, v)
+
+	case reflect.Map:
+		return encodeMapType(w, v)
+
+	case reflect.Struct:
+		return encodeStructType(w, v)
+	}
+
+	return fmt.Errorf("can't encode type: %s", v.Type())
+}
+
+// encodeMarshalerType handles encoding for types implementing the Marshaler interface.
+func encodeMarshalerType(w io.Writer, marshaler Marshaler) error {
+	if marshaler == nil {
+		return nil
+	}
+
+	bytes, err := marshaler.MarshalBencode()
+	if err != nil {
+		return err
+	}
+
+	_, err = w.Write(bytes)
+	return err
+}
+
+// encodeTextMarshalerType handles encoding for types implementing the TextMarshaler interface.
+func encodeTextMarshalerType(w io.Writer, textMarshaler encoding.TextMarshaler) error {
+	if textMarshaler == nil {
+		return nil
+	}
+
+	bytes, err := textMarshaler.MarshalText()
+	if err != nil {
+		return err
+	}
+
+	_, err = fmt.Fprintf(w, "%d:%s", len(bytes), bytes)
+	return err
+}
+
+// encodeNumericTypes handles encoding for numeric types (int, uint, bool).
+func encodeNumericTypes(w io.Writer, v reflect.Value) error {
 	switch v.Kind() {
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 		_, err := fmt.Fprintf(w, "i%de", v.Int())
@@ -122,95 +167,103 @@ func encodeValue(w io.Writer, val reflect.Value) error {
 		}
 		_, err := fmt.Fprintf(w, "i%de", i)
 		return err
+	}
 
-	case reflect.String:
-		_, err := fmt.Fprintf(w, "%d:%s", len(v.String()), v.String())
+	return fmt.Errorf("unsupported numeric type: %s", v.Type())
+}
+
+// encodeStringType handles encoding for string types.
+func encodeStringType(w io.Writer, v reflect.Value) error {
+	_, err := fmt.Fprintf(w, "%d:%s", len(v.String()), v.String())
+	return err
+}
+
+// encodeSliceArrayType handles encoding for slice and array types.
+func encodeSliceArrayType(w io.Writer, val, v reflect.Value) error {
+	// handle byte slices like strings
+	if byteSlice, ok := val.Interface().([]byte); ok {
+		_, err := fmt.Fprintf(w, "%d:", len(byteSlice))
+		if err == nil {
+			_, err = w.Write(byteSlice)
+		}
 		return err
+	}
 
-	case reflect.Slice, reflect.Array:
-		// handle byte slices like strings
-		if byteSlice, ok := val.Interface().([]byte); ok {
-			_, err := fmt.Fprintf(w, "%d:", len(byteSlice))
-
-			if err == nil {
-				_, err = w.Write(byteSlice)
-			}
-
-			return err
-		}
-
-		if _, err := fmt.Fprint(w, "l"); err != nil {
-			return err
-		}
-
-		for i := 0; i < v.Len(); i++ {
-			if err := encodeValue(w, v.Index(i)); err != nil {
-				return err
-			}
-		}
-
-		_, err := fmt.Fprint(w, "e")
+	if _, err := fmt.Fprint(w, "l"); err != nil {
 		return err
+	}
 
-	case reflect.Map:
-		if _, err := fmt.Fprint(w, "d"); err != nil {
+	for i := 0; i < v.Len(); i++ {
+		if err := encodeValue(w, v.Index(i)); err != nil {
 			return err
 		}
-		var (
-			keys sortValues = v.MapKeys()
-			mval reflect.Value
-		)
-		sort.Sort(keys)
-		for i := range keys {
-			mval = v.MapIndex(keys[i])
-			if isNilValue(mval) {
-				continue
-			}
-			if err := encodeValue(w, keys[i]); err != nil {
-				return err
-			}
-			if err := encodeValue(w, mval); err != nil {
-				return err
-			}
-		}
-		_, err := fmt.Fprint(w, "e")
+	}
+
+	_, err := fmt.Fprint(w, "e")
+	return err
+}
+
+// encodeMapType handles encoding for map types.
+func encodeMapType(w io.Writer, v reflect.Value) error {
+	if _, err := fmt.Fprint(w, "d"); err != nil {
 		return err
+	}
 
-	case reflect.Struct:
-		if _, err := fmt.Fprint(w, "d"); err != nil {
+	var (
+		keys sortValues = v.MapKeys()
+		mval reflect.Value
+	)
+	sort.Sort(keys)
+	for i := range keys {
+		mval = v.MapIndex(keys[i])
+		if isNilValue(mval) {
+			continue
+		}
+		if err := encodeValue(w, keys[i]); err != nil {
 			return err
 		}
+		if err := encodeValue(w, mval); err != nil {
+			return err
+		}
+	}
 
-		// add embedded structs to the dictionary
-		dict := make(dictionary, 0, v.NumField())
-		dict, err := readStruct(dict, v)
+	_, err := fmt.Fprint(w, "e")
+	return err
+}
+
+// encodeStructType handles encoding for struct types.
+func encodeStructType(w io.Writer, v reflect.Value) error {
+	if _, err := fmt.Fprint(w, "d"); err != nil {
+		return err
+	}
+
+	// add embedded structs to the dictionary
+	dict := make(dictionary, 0, v.NumField())
+	dict, err := readStruct(dict, v)
+	if err != nil {
+		return err
+	}
+
+	// sort the dictionary by keys
+	sort.Sort(dict)
+
+	// encode the dictionary in order
+	for _, def := range dict {
+		// encode the key
+		err := encodeValue(w, reflect.ValueOf(def.key))
 		if err != nil {
 			return err
 		}
 
-		// sort the dictionary by keys
-		sort.Sort(dict)
-
-		// encode the dictionary in order
-		for _, def := range dict {
-			// encode the key
-			err := encodeValue(w, reflect.ValueOf(def.key))
-			if err != nil {
-				return err
-			}
-
-			// encode the value
-			err = encodeValue(w, def.value)
-			if err != nil {
-				return err
-			}
+		// encode the value
+		err = encodeValue(w, def.value)
+		if err != nil {
+			return err
 		}
-
-		_, err = fmt.Fprint(w, "e")
-		return err
 	}
 
-	return fmt.Errorf("can't encode type: %s", v.Type())
+	_, err = fmt.Fprint(w, "e")
+	return err
 }
 
 // indirectEncodeValue walks down v allocating pointers as needed,
