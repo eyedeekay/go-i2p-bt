@@ -23,9 +23,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/go-i2p/i2pkeys"
 	"github.com/go-i2p/go-i2p-bt/bencode"
 	"github.com/go-i2p/go-i2p-bt/utils"
+	"github.com/go-i2p/i2pkeys"
 )
 
 // ErrInvalidAddr is returned when the compact address is invalid.
@@ -187,56 +187,59 @@ func (a *Address) FromString(addr string) (err error) {
 	return
 }
 
-// FromUDPAddr sets the ip from net.UDPAddr.
-func (a *Address) FromUDPAddr(ua net.Addr) {
+// FromAddr sets the ip from net.Addr. // MIGRATED: Renamed from FromUDPAddr to accept any net.Addr
+func (a *Address) FromAddr(ua net.Addr) {
 	a.Port = uint16(utils.Port(ua))
 	a.IP = ua
 }
 
+// FromUDPAddr sets the ip from net.UDPAddr. // MIGRATED: Preserved for backward compatibility
+func (a *Address) FromUDPAddr(ua net.Addr) {
+	a.FromAddr(ua) // MIGRATED: Delegate to generic method
+}
+
 // Addr creates a new net.Addr.
 func (a Address) Addr() net.Addr {
-	switch a.IP.(type) {
+	switch v := a.IP.(type) { // MIGRATED: Using type switch for better readability
 	case *net.IPAddr:
 		return &net.UDPAddr{
-			IP:   a.IP.(*net.IPAddr).IP,
+			IP:   v.IP,
 			Port: int(a.Port),
 		}
 	case *net.UDPAddr:
 		return &net.UDPAddr{
-			IP:   a.IP.(*net.UDPAddr).IP,
+			IP:   v.IP,
 			Port: int(a.Port),
 		}
 	case *i2pkeys.I2PAddr:
-		retvalue := a.IP.(*i2pkeys.I2PAddr)
-		return retvalue
+		return v
 	case i2pkeys.I2PAddr:
-		retvalue := a.IP.(i2pkeys.I2PAddr)
-		return &retvalue
+		return &v
 	default:
 		return nil
 	}
 }
 
 func (a Address) IsIPv6() bool {
-	switch a.IP.(type) {
+	switch v := a.IP.(type) { // MIGRATED: Using type switch for cleaner code
 	case *net.IPAddr:
-		return a.IP.(*net.IPAddr).IP.To4() == nil
+		return v.IP.To4() == nil
 	case *net.UDPAddr:
-		return a.IP.(*net.UDPAddr).IP.To4() == nil
+		return v.IP.To4() == nil
 	default:
 		return false
 	}
 }
 
 func (a Address) To4() *net.IPAddr {
-	switch a.IP.(type) {
+	switch v := a.IP.(type) { // MIGRATED: Using type switch for cleaner code
 	case *net.IPAddr:
 		return &net.IPAddr{
-			IP: a.IP.(*net.IPAddr).IP.To4(),
+			IP: v.IP.To4(),
 		}
 	case *net.UDPAddr:
 		return &net.IPAddr{
-			IP: a.IP.(*net.UDPAddr).IP.To4(),
+			IP: v.IP.To4(),
 		}
 	default:
 		return &net.IPAddr{
@@ -246,14 +249,14 @@ func (a Address) To4() *net.IPAddr {
 }
 
 func (a Address) To16() *net.IPAddr {
-	switch a.IP.(type) {
+	switch v := a.IP.(type) { // MIGRATED: Using type switch for cleaner code
 	case *net.IPAddr:
 		return &net.IPAddr{
-			IP: a.IP.(*net.IPAddr).IP.To16(),
+			IP: v.IP.To16(),
 		}
 	case *net.UDPAddr:
 		return &net.IPAddr{
-			IP: a.IP.(*net.UDPAddr).IP.To16(),
+			IP: v.IP.To16(),
 		}
 	default:
 		return &net.IPAddr{
@@ -285,14 +288,14 @@ func (a Address) HasIPAndPort(ip net.Addr, port uint16) bool {
 // instead of returning.
 func (a Address) WriteBinary(w io.Writer) (m int, err error) {
 	var ip []byte
-	switch a.IP.(type) {
+	switch v := a.IP.(type) { // MIGRATED: Using type switch for cleaner code
 	case *net.IPAddr:
-		ip = []byte(a.IP.(*net.IPAddr).IP)
+		ip = []byte(v.IP)
 	case *net.UDPAddr:
-		ip = []byte(a.IP.(*net.UDPAddr).IP)
+		ip = []byte(v.IP)
 	case i2pkeys.I2PAddr:
 		var err error
-		ip, err = a.IP.(i2pkeys.I2PAddr).ToBytes()
+		ip, err = v.ToBytes()
 		if err != nil {
 			return 0, err
 		}
@@ -423,7 +426,7 @@ type HostAddress struct {
 	Port uint16
 }
 
-// NewHostAddress returns a new host addrress.
+// NewHostAddress returns a new host address.
 func NewHostAddress(host string, port uint16) HostAddress {
 	return HostAddress{Host: host, Port: port}
 }
@@ -533,7 +536,7 @@ func (a HostAddress) MarshalBencode() (b []byte, err error) {
 }
 
 func ConvertAddress(addr net.Addr) (a Address, err error) {
-	switch v := addr.(type) {
+	switch v := addr.(type) { // MIGRATED: Using type switch for cleaner code
 	case *net.TCPAddr:
 		a = NewAddress(v, uint16(v.Port))
 	case *net.UDPAddr:
