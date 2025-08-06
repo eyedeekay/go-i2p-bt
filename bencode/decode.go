@@ -331,7 +331,7 @@ func (d *Decoder) decodeList(v reflect.Value) error {
 		// if we have an interface, just put a []interface{} in it!
 		if v.Kind() == reflect.Interface {
 			var x []interface{}
-			defer func(p reflect.Value) { p.Set(v) }(v)
+			defer func(p reflect.Value) { p.Set(reflect.ValueOf(x)) }(v)
 			v = reflect.ValueOf(&x).Elem()
 		}
 
@@ -339,7 +339,20 @@ func (d *Decoder) decodeList(v reflect.Value) error {
 			return fmt.Errorf("Cant store a []interface{} into %s", v.Type())
 		}
 	}
-	// read out the l that prefixes the list
+
+	if err := d.consumeListToken(); err != nil {
+		return err
+	}
+
+	if d.raw {
+		return d.processListInRawMode(v)
+	}
+
+	return d.processListElements(v)
+}
+
+// consumeListToken reads and validates the list start token 'l'.
+func (d *Decoder) consumeListToken() error {
 	ch, err := d.readByte()
 	if err != nil {
 		return err
@@ -347,31 +360,32 @@ func (d *Decoder) decodeList(v reflect.Value) error {
 	if ch != 'l' {
 		panic("got something other than a list head after a peek")
 	}
+	return nil
+}
 
-	// if we're decoding in raw mode,
-	// we only want to read into the buffer,
-	// without actually parsing any values
-	if d.raw {
-		var ch byte
-		for {
-			// peek for the end token and read it out
-			ch, err = d.peekByte()
-			if err != nil {
-				return err
-			}
-			if ch == 'e' {
-				_, err = d.readByte() // consume the end
-				return err
-			}
+// processListInRawMode handles list decoding when in raw mode.
+func (d *Decoder) processListInRawMode(v reflect.Value) error {
+	for {
+		// peek for the end token and read it out
+		ch, err := d.peekByte()
+		if err != nil {
+			return err
+		}
+		if ch == 'e' {
+			_, err = d.readByte() // consume the end
+			return err
+		}
 
-			// decode the next value
-			err = d.decodeInto(v)
-			if err != nil {
-				return err
-			}
+		// decode the next value
+		err = d.decodeInto(v)
+		if err != nil {
+			return err
 		}
 	}
+}
 
+// processListElements processes the main element decoding loop for lists.
+func (d *Decoder) processListElements(v reflect.Value) error {
 	for i := 0; ; i++ {
 		// peek for the end token and read it out
 		ch, err := d.peekByte()
@@ -384,20 +398,8 @@ func (d *Decoder) decodeList(v reflect.Value) error {
 			return err
 		}
 
-		// grow it if required
-		if i >= v.Cap() && v.IsValid() {
-			newcap := v.Cap() + v.Cap()/2
-			if newcap < 4 {
-				newcap = 4
-			}
-			newv := reflect.MakeSlice(v.Type(), v.Len(), newcap)
-			reflect.Copy(newv, v)
-			v.Set(newv)
-		}
-
-		// reslice into cap (its a slice now since it had to have grown)
-		if i >= v.Len() && v.IsValid() {
-			v.SetLen(i + 1)
+		if err := d.ensureSliceCapacity(&v, i); err != nil {
+			return err
 		}
 
 		// decode a value into the index
@@ -405,6 +407,26 @@ func (d *Decoder) decodeList(v reflect.Value) error {
 			return err
 		}
 	}
+}
+
+// ensureSliceCapacity grows the slice capacity if needed and adjusts length.
+func (d *Decoder) ensureSliceCapacity(v *reflect.Value, index int) error {
+	// grow it if required
+	if index >= v.Cap() && v.IsValid() {
+		newcap := v.Cap() + v.Cap()/2
+		if newcap < 4 {
+			newcap = 4
+		}
+		newv := reflect.MakeSlice(v.Type(), v.Len(), newcap)
+		reflect.Copy(newv, *v)
+		v.Set(newv)
+	}
+
+	// reslice into cap (its a slice now since it had to have grown)
+	if index >= v.Len() && v.IsValid() {
+		v.SetLen(index + 1)
+	}
+	return nil
 }
 
 func (d *Decoder) decodeDict(v reflect.Value) error {
