@@ -19,7 +19,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"sort"
 )
 
@@ -237,19 +236,18 @@ func readByte(r io.Reader) (b byte, err error) {
 // if maxLength is equal to 0, it is unlimited. Or, it will read maxLength bytes
 // at most.
 func (m *Message) Decode(r io.Reader, maxLength uint32) (err error) {
-	var length uint32
-	if err = binary.Read(r, binary.BigEndian, &length); err != nil {
-		if err != io.EOF {
-			err = fmt.Errorf("reading length error: %s", err)
-		}
-		return
+	length, err := m.readMessageLength(r)
+	if err != nil {
+		return err
 	}
 
 	if length == 0 {
 		m.Keepalive = true
-		return
-	} else if maxLength > 0 && length > maxLength {
-		return errMessageTooLong
+		return nil
+	}
+
+	if err = m.validateMessageLength(length, maxLength); err != nil {
+		return err
 	}
 
 	m.Keepalive = false
@@ -262,57 +260,122 @@ func (m *Message) Decode(r io.Reader, maxLength uint32) (err error) {
 		}
 	}()
 
-	_type, err := readByte(lr)
+	messageType, err := readByte(lr)
 	if err != nil {
-		return
+		return err
 	}
 
-	switch m.Type = MessageType(_type); m.Type {
+	m.Type = MessageType(messageType)
+	return m.decodeByMessageType(lr, length)
+}
+
+// readMessageLength reads and validates the message length from the reader.
+func (m *Message) readMessageLength(r io.Reader) (uint32, error) {
+	var length uint32
+	if err := binary.Read(r, binary.BigEndian, &length); err != nil {
+		if err != io.EOF {
+			return 0, fmt.Errorf("reading length error: %s", err)
+		}
+		return 0, err
+	}
+	return length, nil
+}
+
+// validateMessageLength checks if the message length is within acceptable limits.
+func (m *Message) validateMessageLength(length, maxLength uint32) error {
+	if maxLength > 0 && length > maxLength {
+		return errMessageTooLong
+	}
+	return nil
+}
+
+// decodeByMessageType decodes the message payload based on its type.
+func (m *Message) decodeByMessageType(lr *io.LimitedReader, length uint32) error {
+	switch m.Type {
 	case MTypeChoke, MTypeUnchoke, MTypeInterested, MTypeNotInterested,
 		MTypeHaveAll, MTypeHaveNone:
+		return nil
 	case MTypeHave, MTypeAllowedFast, MTypeSuggest:
-		err = binary.Read(lr, binary.BigEndian, &m.Index)
+		return m.decodeIndexOnlyMessage(lr)
 	case MTypeRequest, MTypeCancel, MTypeReject:
-		if err = binary.Read(lr, binary.BigEndian, &m.Index); err != nil {
-			return
-		}
-		if err = binary.Read(lr, binary.BigEndian, &m.Begin); err != nil {
-			return
-		}
-		if err = binary.Read(lr, binary.BigEndian, &m.Length); err != nil {
-			return
-		}
+		return m.decodeRequestLikeMessage(lr)
 	case MTypeBitField:
-		_len := length - 1
-		bs := make([]byte, _len)
-		if _, err = io.ReadFull(lr, bs); err == nil {
-			m.BitField = BitField(bs)
-		}
+		return m.decodeBitFieldMessage(lr, length)
 	case MTypePiece:
-		if err = binary.Read(lr, binary.BigEndian, &m.Index); err != nil {
-			return
-		}
-		if err = binary.Read(lr, binary.BigEndian, &m.Begin); err != nil {
-			return
-		}
-
-		// TODO: Should we use a []byte pool?
-		m.Piece = make([]byte, lr.N)
-		if _, err = io.ReadFull(lr, m.Piece); err != nil {
-			return fmt.Errorf("reading piece data error: %s", err)
-		}
+		return m.decodePieceMessage(lr)
 	case MTypeExtended:
-		if m.ExtendedID, err = readByte(lr); err == nil {
-			m.ExtendedPayload, err = ioutil.ReadAll(lr)
-		}
+		return m.decodeExtendedMessage(lr)
 	case MTypePort:
-		err = binary.Read(lr, binary.BigEndian, &m.Port)
+		return m.decodePortMessage(lr)
 	default:
-		// err = fmt.Errorf("unknown message type %v", m.Type)
-		m.UnknownTypePayload, err = ioutil.ReadAll(lr)
+		return m.decodeUnknownMessage(lr)
+	}
+}
+
+// decodeIndexOnlyMessage decodes messages that contain only an index field.
+func (m *Message) decodeIndexOnlyMessage(lr *io.LimitedReader) error {
+	return binary.Read(lr, binary.BigEndian, &m.Index)
+}
+
+// decodeRequestLikeMessage decodes request, cancel, and reject messages.
+func (m *Message) decodeRequestLikeMessage(lr *io.LimitedReader) error {
+	if err := binary.Read(lr, binary.BigEndian, &m.Index); err != nil {
+		return err
+	}
+	if err := binary.Read(lr, binary.BigEndian, &m.Begin); err != nil {
+		return err
+	}
+	return binary.Read(lr, binary.BigEndian, &m.Length)
+}
+
+// decodeBitFieldMessage decodes bitfield messages.
+func (m *Message) decodeBitFieldMessage(lr *io.LimitedReader, length uint32) error {
+	_len := length - 1
+	bs := make([]byte, _len)
+	if _, err := io.ReadFull(lr, bs); err == nil {
+		m.BitField = BitField(bs)
+	}
+	return nil
+}
+
+// decodePieceMessage decodes piece messages containing data blocks.
+func (m *Message) decodePieceMessage(lr *io.LimitedReader) error {
+	if err := binary.Read(lr, binary.BigEndian, &m.Index); err != nil {
+		return err
+	}
+	if err := binary.Read(lr, binary.BigEndian, &m.Begin); err != nil {
+		return err
 	}
 
-	return
+	// TODO: Should we use a []byte pool?
+	m.Piece = make([]byte, lr.N)
+	if _, err := io.ReadFull(lr, m.Piece); err != nil {
+		return fmt.Errorf("reading piece data error: %s", err)
+	}
+	return nil
+}
+
+// decodeExtendedMessage decodes extended protocol messages.
+func (m *Message) decodeExtendedMessage(lr *io.LimitedReader) error {
+	extendedID, err := readByte(lr)
+	if err != nil {
+		return err
+	}
+	m.ExtendedID = extendedID
+	m.ExtendedPayload, err = io.ReadAll(lr)
+	return err
+}
+
+// decodePortMessage decodes port messages.
+func (m *Message) decodePortMessage(lr *io.LimitedReader) error {
+	return binary.Read(lr, binary.BigEndian, &m.Port)
+}
+
+// decodeUnknownMessage handles unknown message types.
+func (m *Message) decodeUnknownMessage(lr *io.LimitedReader) error {
+	var err error
+	m.UnknownTypePayload, err = io.ReadAll(lr)
+	return err
 }
 
 // MarshalBinary implements the interface encoding.BinaryMarshaler.
