@@ -465,83 +465,104 @@ func (s *Server) handleMessage(raddr net.Addr, m krpc.Message) {
 	}
 }
 
+// handleQuery processes incoming DHT query messages by routing them to appropriate handlers.
 func (s *Server) handleQuery(raddr net.Addr, m krpc.Message) {
 	switch m.Q {
 	case queryMethodPing:
 		s.reply(raddr, m.T, krpc.ResponseResult{})
-
-	case queryMethodFindNode: // See BEP 32
-		var r krpc.ResponseResult
-		n4 := m.A.ContainsWant(krpc.WantNodes)
-		n6 := m.A.ContainsWant(krpc.WantNodes6)
-		if !n4 && !n6 {
-			if utils.IsIPv6Addr(raddr) {
-				r.Nodes6 = s.routingTable6.Closest(m.A.InfoHash, s.conf.K)
-			} else {
-				r.Nodes = s.routingTable4.Closest(m.A.InfoHash, s.conf.K)
-			}
-		} else {
-			if n4 {
-				r.Nodes = s.routingTable4.Closest(m.A.InfoHash, s.conf.K)
-			}
-			if n6 {
-				r.Nodes6 = s.routingTable6.Closest(m.A.InfoHash, s.conf.K)
-			}
-		}
-		s.reply(raddr, m.T, r)
-
-	case queryMethodGetPeers: // See BEP 32
-		n4 := m.A.ContainsWant(krpc.WantNodes)
-		n6 := m.A.ContainsWant(krpc.WantNodes6)
-
-		// Get the ipv4/ipv6 peers storing the torrent infohash.
-		var r krpc.ResponseResult
-		if !n4 && !n6 {
-			r.Values = s.peerManager.GetPeers(m.A.InfoHash, s.conf.K, utils.IsIPv6Addr(raddr))
-		} else {
-			if n4 {
-				r.Values = s.peerManager.GetPeers(m.A.InfoHash, s.conf.K, false)
-			}
-
-			if n6 {
-				values := s.peerManager.GetPeers(m.A.InfoHash, s.conf.K, true)
-				if len(r.Values) == 0 {
-					r.Values = values
-				} else {
-					r.Values = append(r.Values, values...)
-				}
-			}
-		}
-
-		// No Peers, and return the closest other nodes.
-		if len(r.Values) == 0 {
-			if !n4 && !n6 {
-				if utils.IsIPv6Addr(raddr) {
-					r.Nodes6 = s.routingTable6.Closest(m.A.InfoHash, s.conf.K)
-				} else {
-					r.Nodes = s.routingTable4.Closest(m.A.InfoHash, s.conf.K)
-				}
-			} else {
-				if n4 {
-					r.Nodes = s.routingTable4.Closest(m.A.InfoHash, s.conf.K)
-				}
-				if n6 {
-					r.Nodes6 = s.routingTable6.Closest(m.A.InfoHash, s.conf.K)
-				}
-			}
-		}
-
-		r.Token = s.tokenManager.Token(raddr)
-		s.reply(raddr, m.T, r)
-		s.conf.OnSearch(m.A.InfoHash.HexString(), raddr)
+	case queryMethodFindNode:
+		s.handleFindNodeQuery(raddr, m)
+	case queryMethodGetPeers:
+		s.handleGetPeersQuery(raddr, m)
 	case queryMethodAnnouncePeer:
-		if s.tokenManager.Check(raddr, m.A.Token) {
-			return
-		}
-		s.reply(raddr, m.T, krpc.ResponseResult{})
-		s.conf.OnTorrent(m.A.InfoHash.HexString(), raddr)
+		s.handleAnnouncePeerQuery(raddr, m)
 	default:
 		s.sendError(raddr, m.T, "unknown query method", krpc.ErrorCodeMethodUnknown)
+	}
+}
+
+// handleFindNodeQuery processes find_node queries as defined in BEP 32.
+func (s *Server) handleFindNodeQuery(raddr net.Addr, m krpc.Message) {
+	var r krpc.ResponseResult
+	n4 := m.A.ContainsWant(krpc.WantNodes)
+	n6 := m.A.ContainsWant(krpc.WantNodes6)
+
+	if !n4 && !n6 {
+		s.populateNodesBasedOnAddress(raddr, m.A.InfoHash, &r)
+	} else {
+		s.populateRequestedNodes(n4, n6, m.A.InfoHash, &r)
+	}
+
+	s.reply(raddr, m.T, r)
+}
+
+// handleGetPeersQuery processes get_peers queries as defined in BEP 32.
+func (s *Server) handleGetPeersQuery(raddr net.Addr, m krpc.Message) {
+	n4 := m.A.ContainsWant(krpc.WantNodes)
+	n6 := m.A.ContainsWant(krpc.WantNodes6)
+
+	var r krpc.ResponseResult
+	s.populatePeersResponse(n4, n6, raddr, m.A.InfoHash, &r)
+
+	// If no peers found, populate with closest nodes
+	if len(r.Values) == 0 {
+		if !n4 && !n6 {
+			s.populateNodesBasedOnAddress(raddr, m.A.InfoHash, &r)
+		} else {
+			s.populateRequestedNodes(n4, n6, m.A.InfoHash, &r)
+		}
+	}
+
+	r.Token = s.tokenManager.Token(raddr)
+	s.reply(raddr, m.T, r)
+	s.conf.OnSearch(m.A.InfoHash.HexString(), raddr)
+}
+
+// handleAnnouncePeerQuery processes announce_peer queries.
+func (s *Server) handleAnnouncePeerQuery(raddr net.Addr, m krpc.Message) {
+	if s.tokenManager.Check(raddr, m.A.Token) {
+		return
+	}
+	s.reply(raddr, m.T, krpc.ResponseResult{})
+	s.conf.OnTorrent(m.A.InfoHash.HexString(), raddr)
+}
+
+// populateNodesBasedOnAddress populates response nodes based on the requester's IP version.
+func (s *Server) populateNodesBasedOnAddress(raddr net.Addr, infoHash metainfo.Hash, r *krpc.ResponseResult) {
+	if utils.IsIPv6Addr(raddr) {
+		r.Nodes6 = s.routingTable6.Closest(infoHash, s.conf.K)
+	} else {
+		r.Nodes = s.routingTable4.Closest(infoHash, s.conf.K)
+	}
+}
+
+// populateRequestedNodes populates response with specifically requested node types.
+func (s *Server) populateRequestedNodes(n4, n6 bool, infoHash metainfo.Hash, r *krpc.ResponseResult) {
+	if n4 {
+		r.Nodes = s.routingTable4.Closest(infoHash, s.conf.K)
+	}
+	if n6 {
+		r.Nodes6 = s.routingTable6.Closest(infoHash, s.conf.K)
+	}
+}
+
+// populatePeersResponse gathers peers for the requested InfoHash based on wanted node types.
+func (s *Server) populatePeersResponse(n4, n6 bool, raddr net.Addr, infoHash metainfo.Hash, r *krpc.ResponseResult) {
+	if !n4 && !n6 {
+		r.Values = s.peerManager.GetPeers(infoHash, s.conf.K, utils.IsIPv6Addr(raddr))
+	} else {
+		if n4 {
+			r.Values = s.peerManager.GetPeers(infoHash, s.conf.K, false)
+		}
+
+		if n6 {
+			values := s.peerManager.GetPeers(infoHash, s.conf.K, true)
+			if len(r.Values) == 0 {
+				r.Values = values
+			} else {
+				r.Values = append(r.Values, values...)
+			}
+		}
 	}
 }
 
