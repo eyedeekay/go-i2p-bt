@@ -457,145 +457,15 @@ func (pc *PeerConn) HandleMessage(msg Message, handler Handler) (err error) {
 		return
 	}
 
-	switch msg.Type {
-	// BEP 3 - The BitTorrent Protocol Specification
-	case MTypeChoke:
-		pc.PeerChoked = true
-		if h, ok := handler.(Bep3Handler); ok {
-			err = h.Choke(pc)
-		} else {
-			err = handler.OnMessage(pc, msg)
-		}
-	case MTypeUnchoke:
-		pc.PeerChoked = false
-		if h, ok := handler.(Bep3Handler); ok {
-			err = h.Unchoke(pc)
-		} else {
-			err = handler.OnMessage(pc, msg)
-		}
-	case MTypeInterested:
-		pc.PeerInterested = true
-		if h, ok := handler.(Bep3Handler); ok {
-			err = h.Interested(pc)
-		} else {
-			err = handler.OnMessage(pc, msg)
-		}
-	case MTypeNotInterested:
-		pc.PeerInterested = false
-		if h, ok := handler.(Bep3Handler); ok {
-			err = h.NotInterested(pc)
-		} else {
-			err = handler.OnMessage(pc, msg)
-		}
-	case MTypeHave:
-		if h, ok := handler.(Bep3Handler); ok {
-			err = h.Have(pc, msg.Index)
-		} else {
-			err = handler.OnMessage(pc, msg)
-		}
-	case MTypeBitField:
-		if pc.notFirstMsg {
-			err = ErrNotFirstMsg
-		} else {
-			pc.BitField = msg.BitField
-			if h, ok := handler.(Bep3Handler); ok {
-				err = h.BitField(pc, msg.BitField)
-			} else {
-				err = handler.OnMessage(pc, msg)
-			}
-		}
-	case MTypeRequest:
-		if h, ok := handler.(Bep3Handler); ok {
-			err = h.Request(pc, msg.Index, msg.Begin, msg.Length)
-		} else {
-			err = handler.OnMessage(pc, msg)
-		}
-	case MTypePiece:
-		if h, ok := handler.(Bep3Handler); ok {
-			err = h.Piece(pc, msg.Index, msg.Begin, msg.Piece)
-		} else {
-			err = handler.OnMessage(pc, msg)
-		}
-	case MTypeCancel:
-		if h, ok := handler.(Bep3Handler); ok {
-			err = h.Cancel(pc, msg.Index, msg.Begin, msg.Length)
-		} else {
-			err = handler.OnMessage(pc, msg)
-		}
-
-	// BEP 5 - DHT Protocol
-	case MTypePort:
-		if !pc.ExtBits.IsSupportDHT() {
-			err = ErrNotSupportDHT
-		} else if h, ok := handler.(Bep5Handler); ok {
-			err = h.Port(pc, msg.Port)
-		} else {
-			err = handler.OnMessage(pc, msg)
-		}
-
-	// BEP 6 - Fast Extension
-	case MTypeSuggest:
-		if !pc.ExtBits.IsSupportFast() {
-			err = ErrNotSupportFast
-		} else {
-			pc.Suggests = pc.Suggests.Append(msg.Index)
-			if h, ok := handler.(Bep6Handler); ok {
-				err = h.Suggest(pc, msg.Index)
-			} else {
-				err = handler.OnMessage(pc, msg)
-			}
-		}
-	case MTypeHaveAll:
-		if pc.notFirstMsg {
-			err = ErrNotFirstMsg
-		} else if !pc.ExtBits.IsSupportFast() {
-			err = ErrNotSupportFast
-		} else if h, ok := handler.(Bep6Handler); ok {
-			err = h.HaveAll(pc)
-		} else {
-			err = handler.OnMessage(pc, msg)
-		}
-	case MTypeHaveNone:
-		if pc.notFirstMsg {
-			err = ErrNotFirstMsg
-		} else if !pc.ExtBits.IsSupportFast() {
-			err = ErrNotSupportFast
-		} else if h, ok := handler.(Bep6Handler); ok {
-			err = h.HaveNone(pc)
-		} else {
-			err = handler.OnMessage(pc, msg)
-		}
-	case MTypeReject:
-		if !pc.ExtBits.IsSupportFast() {
-			err = ErrNotSupportFast
-		} else if h, ok := handler.(Bep6Handler); ok {
-			err = h.Reject(pc, msg.Index, msg.Begin, msg.Length)
-		} else {
-			err = handler.OnMessage(pc, msg)
-		}
-	case MTypeAllowedFast:
-		if !pc.ExtBits.IsSupportFast() {
-			err = ErrNotSupportFast
-		} else {
-			pc.Fasts = pc.Fasts.Append(msg.Index)
-			if h, ok := handler.(Bep6Handler); ok {
-				err = h.AllowedFast(pc, msg.Index)
-			} else {
-				err = handler.OnMessage(pc, msg)
-			}
-		}
-
-	// BEP 10 - Extension Protocol
-	case MTypeExtended:
-		if !pc.ExtBits.IsSupportExtended() {
-			err = ErrNotSupportExtended
-		} else if h, ok := handler.(Bep10Handler); ok {
-			err = pc.handleExtMsg(h, msg)
-		} else {
-			err = handler.OnMessage(pc, msg)
-		}
-
-	// Other
+	switch {
+	case pc.isBep3MessageType(msg.Type):
+		err = pc.handleBep3Message(msg, handler)
+	case msg.Type == MTypePort:
+		err = pc.handleBep5Message(msg, handler)
+	case pc.isBep6MessageType(msg.Type):
+		err = pc.handleBep6Message(msg, handler)
+	case msg.Type == MTypeExtended:
+		err = pc.handleBep10Message(msg, handler)
 	default:
 		err = handler.OnMessage(pc, msg)
 	}
@@ -605,6 +475,191 @@ func (pc *PeerConn) HandleMessage(msg Message, handler Handler) (err error) {
 	}
 
 	return
+}
+
+// isBep3MessageType checks if the message type belongs to BEP 3 protocol.
+func (pc *PeerConn) isBep3MessageType(msgType MessageType) bool {
+	return msgType == MTypeChoke || msgType == MTypeUnchoke ||
+		msgType == MTypeInterested || msgType == MTypeNotInterested ||
+		msgType == MTypeHave || msgType == MTypeBitField ||
+		msgType == MTypeRequest || msgType == MTypePiece ||
+		msgType == MTypeCancel
+}
+
+// isBep6MessageType checks if the message type belongs to BEP 6 protocol.
+func (pc *PeerConn) isBep6MessageType(msgType MessageType) bool {
+	return msgType == MTypeSuggest || msgType == MTypeHaveAll ||
+		msgType == MTypeHaveNone || msgType == MTypeReject ||
+		msgType == MTypeAllowedFast
+}
+
+// handleBep3Message handles BEP 3 - The BitTorrent Protocol Specification messages.
+func (pc *PeerConn) handleBep3Message(msg Message, handler Handler) (err error) {
+	switch msg.Type {
+	case MTypeChoke:
+		pc.PeerChoked = true
+		err = pc.invokeBep3Handler(handler, func(h Bep3Handler) error {
+			return h.Choke(pc)
+		}, msg)
+	case MTypeUnchoke:
+		pc.PeerChoked = false
+		err = pc.invokeBep3Handler(handler, func(h Bep3Handler) error {
+			return h.Unchoke(pc)
+		}, msg)
+	case MTypeInterested:
+		pc.PeerInterested = true
+		err = pc.invokeBep3Handler(handler, func(h Bep3Handler) error {
+			return h.Interested(pc)
+		}, msg)
+	case MTypeNotInterested:
+		pc.PeerInterested = false
+		err = pc.invokeBep3Handler(handler, func(h Bep3Handler) error {
+			return h.NotInterested(pc)
+		}, msg)
+	case MTypeHave:
+		err = pc.invokeBep3Handler(handler, func(h Bep3Handler) error {
+			return h.Have(pc, msg.Index)
+		}, msg)
+	case MTypeBitField:
+		err = pc.handleBitFieldMessage(msg, handler)
+	case MTypeRequest:
+		err = pc.invokeBep3Handler(handler, func(h Bep3Handler) error {
+			return h.Request(pc, msg.Index, msg.Begin, msg.Length)
+		}, msg)
+	case MTypePiece:
+		err = pc.invokeBep3Handler(handler, func(h Bep3Handler) error {
+			return h.Piece(pc, msg.Index, msg.Begin, msg.Piece)
+		}, msg)
+	case MTypeCancel:
+		err = pc.invokeBep3Handler(handler, func(h Bep3Handler) error {
+			return h.Cancel(pc, msg.Index, msg.Begin, msg.Length)
+		}, msg)
+	}
+	return
+}
+
+// handleBitFieldMessage handles the special case of BitField messages with first message validation.
+func (pc *PeerConn) handleBitFieldMessage(msg Message, handler Handler) error {
+	if pc.notFirstMsg {
+		return ErrNotFirstMsg
+	}
+	pc.BitField = msg.BitField
+	return pc.invokeBep3Handler(handler, func(h Bep3Handler) error {
+		return h.BitField(pc, msg.BitField)
+	}, msg)
+}
+
+// invokeBep3Handler invokes BEP3Handler if available, otherwise falls back to generic handler.
+func (pc *PeerConn) invokeBep3Handler(handler Handler, bep3Func func(Bep3Handler) error, msg Message) error {
+	if h, ok := handler.(Bep3Handler); ok {
+		return bep3Func(h)
+	}
+	return handler.OnMessage(pc, msg)
+}
+
+// handleBep5Message handles BEP 5 - DHT Protocol messages.
+func (pc *PeerConn) handleBep5Message(msg Message, handler Handler) error {
+	if !pc.ExtBits.IsSupportDHT() {
+		return ErrNotSupportDHT
+	}
+	if h, ok := handler.(Bep5Handler); ok {
+		return h.Port(pc, msg.Port)
+	}
+	return handler.OnMessage(pc, msg)
+}
+
+// handleBep6Message handles BEP 6 - Fast Extension messages.
+func (pc *PeerConn) handleBep6Message(msg Message, handler Handler) (err error) {
+	switch msg.Type {
+	case MTypeSuggest:
+		err = pc.handleSuggestMessage(msg, handler)
+	case MTypeHaveAll:
+		err = pc.handleHaveAllMessage(msg, handler)
+	case MTypeHaveNone:
+		err = pc.handleHaveNoneMessage(msg, handler)
+	case MTypeReject:
+		err = pc.handleRejectMessage(msg, handler)
+	case MTypeAllowedFast:
+		err = pc.handleAllowedFastMessage(msg, handler)
+	}
+	return
+}
+
+// handleSuggestMessage handles MTypeSuggest messages with fast extension validation.
+func (pc *PeerConn) handleSuggestMessage(msg Message, handler Handler) error {
+	if !pc.ExtBits.IsSupportFast() {
+		return ErrNotSupportFast
+	}
+	pc.Suggests = pc.Suggests.Append(msg.Index)
+	return pc.invokeBep6Handler(handler, func(h Bep6Handler) error {
+		return h.Suggest(pc, msg.Index)
+	}, msg)
+}
+
+// handleHaveAllMessage handles MTypeHaveAll messages with validation.
+func (pc *PeerConn) handleHaveAllMessage(msg Message, handler Handler) error {
+	if pc.notFirstMsg {
+		return ErrNotFirstMsg
+	}
+	if !pc.ExtBits.IsSupportFast() {
+		return ErrNotSupportFast
+	}
+	return pc.invokeBep6Handler(handler, func(h Bep6Handler) error {
+		return h.HaveAll(pc)
+	}, msg)
+}
+
+// handleHaveNoneMessage handles MTypeHaveNone messages with validation.
+func (pc *PeerConn) handleHaveNoneMessage(msg Message, handler Handler) error {
+	if pc.notFirstMsg {
+		return ErrNotFirstMsg
+	}
+	if !pc.ExtBits.IsSupportFast() {
+		return ErrNotSupportFast
+	}
+	return pc.invokeBep6Handler(handler, func(h Bep6Handler) error {
+		return h.HaveNone(pc)
+	}, msg)
+}
+
+// handleRejectMessage handles MTypeReject messages with fast extension validation.
+func (pc *PeerConn) handleRejectMessage(msg Message, handler Handler) error {
+	if !pc.ExtBits.IsSupportFast() {
+		return ErrNotSupportFast
+	}
+	return pc.invokeBep6Handler(handler, func(h Bep6Handler) error {
+		return h.Reject(pc, msg.Index, msg.Begin, msg.Length)
+	}, msg)
+}
+
+// handleAllowedFastMessage handles MTypeAllowedFast messages with fast extension validation.
+func (pc *PeerConn) handleAllowedFastMessage(msg Message, handler Handler) error {
+	if !pc.ExtBits.IsSupportFast() {
+		return ErrNotSupportFast
+	}
+	pc.Fasts = pc.Fasts.Append(msg.Index)
+	return pc.invokeBep6Handler(handler, func(h Bep6Handler) error {
+		return h.AllowedFast(pc, msg.Index)
+	}, msg)
+}
+
+// invokeBep6Handler invokes BEP6Handler if available, otherwise falls back to generic handler.
+func (pc *PeerConn) invokeBep6Handler(handler Handler, bep6Func func(Bep6Handler) error, msg Message) error {
+	if h, ok := handler.(Bep6Handler); ok {
+		return bep6Func(h)
+	}
+	return handler.OnMessage(pc, msg)
+}
+
+// handleBep10Message handles BEP 10 - Extension Protocol messages.
+func (pc *PeerConn) handleBep10Message(msg Message, handler Handler) error {
+	if !pc.ExtBits.IsSupportExtended() {
+		return ErrNotSupportExtended
+	}
+	if h, ok := handler.(Bep10Handler); ok {
+		return pc.handleExtMsg(h, msg)
+	}
+	return handler.OnMessage(pc, msg)
 }
 
 func (pc *PeerConn) handleExtMsg(h Bep10Handler, m Message) (err error) {
