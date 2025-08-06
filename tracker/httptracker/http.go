@@ -139,32 +139,73 @@ func (r AnnounceRequest) ToQuery() (vs url.Values) {
 
 // FromQuery converts URL Query to itself.
 func (r *AnnounceRequest) FromQuery(vs url.Values) (err error) {
-	if err = r.InfoHash.FromString(vs.Get("info_hash")); err != nil {
-		return
+	if err = r.parseRequiredFields(vs); err != nil {
+		return err
 	}
 
-	if err = r.PeerID.FromString(vs.Get("peer_id")); err != nil {
-		return
+	if err = r.parseOptionalFields(vs); err != nil {
+		return err
 	}
 
+	r.parseStringFields(vs)
+	return nil
+}
+
+// parseRequiredFields parses mandatory fields from URL values.
+func (r *AnnounceRequest) parseRequiredFields(vs url.Values) error {
+	if err := r.InfoHash.FromString(vs.Get("info_hash")); err != nil {
+		return err
+	}
+
+	if err := r.PeerID.FromString(vs.Get("peer_id")); err != nil {
+		return err
+	}
+
+	return r.parseRequiredIntegers(vs)
+}
+
+// parseRequiredIntegers parses mandatory integer fields from URL values.
+func (r *AnnounceRequest) parseRequiredIntegers(vs url.Values) error {
 	v, err := strconv.ParseInt(vs.Get("uploaded"), 10, 64)
 	if err != nil {
-		return
+		return err
 	}
 	r.Uploaded = v
 
 	v, err = strconv.ParseInt(vs.Get("downloaded"), 10, 64)
 	if err != nil {
-		return
+		return err
 	}
 	r.Downloaded = v
 
 	v, err = strconv.ParseInt(vs.Get("left"), 10, 64)
 	if err != nil {
-		return
+		return err
 	}
 	r.Left = v
 
+	return nil
+}
+
+// parseOptionalFields parses optional integer fields from URL values.
+func (r *AnnounceRequest) parseOptionalFields(vs url.Values) error {
+	if err := r.parseEventField(vs); err != nil {
+		return err
+	}
+
+	if err := r.parsePortField(vs); err != nil {
+		return err
+	}
+
+	if err := r.parseNumWantField(vs); err != nil {
+		return err
+	}
+
+	return r.parseKeyField(vs)
+}
+
+// parseEventField parses the optional event field from URL values.
+func (r *AnnounceRequest) parseEventField(vs url.Values) error {
 	if s := vs.Get("event"); s != "" {
 		v, err := strconv.ParseUint(s, 10, 64)
 		if err != nil {
@@ -172,7 +213,11 @@ func (r *AnnounceRequest) FromQuery(vs url.Values) (err error) {
 		}
 		r.Event = uint32(v)
 	}
+	return nil
+}
 
+// parsePortField parses the optional port field from URL values.
+func (r *AnnounceRequest) parsePortField(vs url.Values) error {
 	if s := vs.Get("port"); s != "" {
 		v, err := strconv.ParseUint(s, 10, 64)
 		if err != nil {
@@ -180,7 +225,11 @@ func (r *AnnounceRequest) FromQuery(vs url.Values) (err error) {
 		}
 		r.Port = uint16(v)
 	}
+	return nil
+}
 
+// parseNumWantField parses the optional numwant field from URL values.
+func (r *AnnounceRequest) parseNumWantField(vs url.Values) error {
 	if s := vs.Get("numwant"); s != "" {
 		v, err := strconv.ParseUint(s, 10, 64)
 		if err != nil {
@@ -188,7 +237,11 @@ func (r *AnnounceRequest) FromQuery(vs url.Values) (err error) {
 		}
 		r.NumWant = int32(v)
 	}
+	return nil
+}
 
+// parseKeyField parses the optional key field from URL values.
+func (r *AnnounceRequest) parseKeyField(vs url.Values) error {
 	if s := vs.Get("key"); s != "" {
 		v, err := strconv.ParseInt(s, 10, 64)
 		if err != nil {
@@ -196,7 +249,11 @@ func (r *AnnounceRequest) FromQuery(vs url.Values) (err error) {
 		}
 		r.Key = int32(v)
 	}
+	return nil
+}
 
+// parseStringFields parses string and boolean fields from URL values.
+func (r *AnnounceRequest) parseStringFields(vs url.Values) {
 	r.IP = vs.Get("ip")
 	switch vs.Get("compact") {
 	case "1":
@@ -204,8 +261,6 @@ func (r *AnnounceRequest) FromQuery(vs url.Values) (err error) {
 	case "0":
 		r.Compact = false
 	}
-
-	return
 }
 
 // AnnounceResponse is a announce response.
