@@ -411,11 +411,28 @@ func (d *Decoder) decodeDict(v reflect.Value) error {
 	// if we have an interface{}, just put a map[string]interface{} in it!
 	if !d.raw && v.Kind() == reflect.Interface {
 		var x map[string]interface{}
-		defer func(p reflect.Value) { p.Set(v) }(v)
+		defer func(p reflect.Value) { p.Set(reflect.ValueOf(x)) }(v)
 		v = reflect.ValueOf(&x).Elem()
 	}
 
-	// consume the head token
+	if err := d.consumeDictToken(); err != nil {
+		return err
+	}
+
+	if d.raw {
+		return d.processDictInRawMode(v)
+	}
+
+	mapElem, isMap, vals, err := d.setupDictTarget(v)
+	if err != nil {
+		return err
+	}
+
+	return d.processDictKeyValuePairs(v, mapElem, isMap, vals)
+}
+
+// consumeDictToken reads and validates the dictionary start token 'd'.
+func (d *Decoder) consumeDictToken() error {
 	ch, err := d.readByte()
 	if err != nil {
 		return err
@@ -423,46 +440,40 @@ func (d *Decoder) decodeDict(v reflect.Value) error {
 	if ch != 'd' {
 		panic("got an incorrect token when it was checked already")
 	}
+	return nil
+}
 
-	if d.raw {
-		// if we're decoding in raw mode,
-		// we only want to read into the buffer,
-		// without actually parsing any values
-		for {
-			// peek the next value type
-			ch, err := d.peekByte()
-			if err != nil {
-				return err
-			}
-			if ch == 'e' {
-				_, err = d.readByte() // consume the end token
-				return err
-			}
+// processDictInRawMode handles dictionary decoding when in raw mode.
+func (d *Decoder) processDictInRawMode(v reflect.Value) error {
+	for {
+		ch, err := d.peekByte()
+		if err != nil {
+			return err
+		}
+		if ch == 'e' {
+			_, err = d.readByte() // consume the end token
+			return err
+		}
 
-			err = d.decodeString(v)
-			if err != nil {
-				return err
-			}
+		err = d.decodeString(v)
+		if err != nil {
+			return err
+		}
 
-			err = d.decodeInto(v)
-			if err != nil {
-				return err
-			}
+		err = d.decodeInto(v)
+		if err != nil {
+			return err
 		}
 	}
+}
 
-	// check for correct type
-	var (
-		mapElem reflect.Value
-		isMap   bool
-		vals    map[string]reflect.Value
-	)
-
+// setupDictTarget validates the target type and prepares variables for dictionary decoding.
+func (d *Decoder) setupDictTarget(v reflect.Value) (mapElem reflect.Value, isMap bool, vals map[string]reflect.Value, err error) {
 	switch v.Kind() {
 	case reflect.Map:
 		t := v.Type()
 		if t.Key() != reflectStringType {
-			return fmt.Errorf("Can't store a map[string]interface{} into %s", v.Type())
+			return reflect.Value{}, false, nil, fmt.Errorf("Can't store a map[string]interface{} into %s", v.Type())
 		}
 		if v.IsNil() {
 			v.Set(reflect.MakeMap(t))
@@ -474,18 +485,18 @@ func (d *Decoder) decodeDict(v reflect.Value) error {
 		vals = make(map[string]reflect.Value)
 		setStructValues(vals, v)
 	default:
-		return fmt.Errorf("Can't store a map[string]interface{} into %s", v.Type())
+		return reflect.Value{}, false, nil, fmt.Errorf("Can't store a map[string]interface{} into %s", v.Type())
 	}
+	return mapElem, isMap, vals, nil
+}
 
-	var (
-		lastKey string
-		first   bool = true
-	)
+// processDictKeyValuePairs processes the main key-value parsing loop for dictionaries.
+func (d *Decoder) processDictKeyValuePairs(v, mapElem reflect.Value, isMap bool, vals map[string]reflect.Value) error {
+	var lastKey string
+	first := true
 
 	for {
-		var subv reflect.Value
-
-		// peek the next value type
+		// Check for end of dictionary
 		ch, err := d.peekByte()
 		if err != nil {
 			return err
@@ -495,45 +506,68 @@ func (d *Decoder) decodeDict(v reflect.Value) error {
 			return err
 		}
 
-		// peek the next value we're suppsed to read
-		var key string
-		if err := d.decodeString(reflect.ValueOf(&key).Elem()); err != nil {
+		key, err := d.readDictKey()
+		if err != nil {
 			return err
 		}
 
-		// check for unordered keys
-		if !first && d.failUnordered && lastKey > key {
-			return fmt.Errorf("unordered dictionary: %q appears before %q",
-				lastKey, key)
+		if err := d.validateKeyOrder(&lastKey, &first, key); err != nil {
+			return err
 		}
-		lastKey, first = key, false
 
-		if isMap {
-			mapElem.Set(reflect.Zero(v.Type().Elem()))
-			subv = mapElem
-		} else {
-			subv = vals[key]
+		subv, err := d.prepareValueTarget(key, mapElem, isMap, vals, v)
+		if err != nil {
+			return err
 		}
 
 		if !subv.IsValid() {
-			// if it's invalid, grab but ignore the next value
-			var x interface{}
-			err := d.decodeInto(reflect.ValueOf(&x).Elem())
-			if err != nil {
+			if err := d.skipInvalidValue(); err != nil {
 				return err
 			}
-
 			continue
 		}
 
-		// subv now contains what we load into
 		if err := d.decodeInto(subv); err != nil {
 			return err
 		}
+
 		if isMap {
 			v.SetMapIndex(reflect.ValueOf(key), subv)
 		}
 	}
+}
+
+// readDictKey reads and returns the next dictionary key.
+func (d *Decoder) readDictKey() (string, error) {
+	var key string
+	if err := d.decodeString(reflect.ValueOf(&key).Elem()); err != nil {
+		return "", err
+	}
+	return key, nil
+}
+
+// validateKeyOrder checks for unordered keys if required.
+func (d *Decoder) validateKeyOrder(lastKey *string, first *bool, key string) error {
+	if !*first && d.failUnordered && *lastKey > key {
+		return fmt.Errorf("unordered dictionary: %q appears before %q", *lastKey, key)
+	}
+	*lastKey, *first = key, false
+	return nil
+}
+
+// prepareValueTarget prepares the target value for decoding based on the key and target type.
+func (d *Decoder) prepareValueTarget(key string, mapElem reflect.Value, isMap bool, vals map[string]reflect.Value, v reflect.Value) (reflect.Value, error) {
+	if isMap {
+		mapElem.Set(reflect.Zero(v.Type().Elem()))
+		return mapElem, nil
+	}
+	return vals[key], nil
+}
+
+// skipInvalidValue skips a value when the target is invalid.
+func (d *Decoder) skipInvalidValue() error {
+	var x interface{}
+	return d.decodeInto(reflect.ValueOf(&x).Elem())
 }
 
 // indirect walks down v allocating pointers as needed,
