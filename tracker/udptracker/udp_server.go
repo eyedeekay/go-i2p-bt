@@ -17,6 +17,7 @@ package udptracker
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"log"
 	"net"
 	"strings"
@@ -216,14 +217,7 @@ func (uts *Server) handlePacket(raddr net.Addr, b []byte) {
 
 	// Handle the connection request.
 	if cid == ProtocolID && action == ActionConnect {
-		if err := uts.handler.OnConnect(raddr); err != nil {
-			uts.sendError(raddr, tid, err.Error())
-			return
-		}
-
-		cid := uts.getConnectionID()
-		uts.addConnection(cid, raddr)
-		uts.sendConnResp(raddr, tid, cid)
+		uts.handleConnectionRequest(raddr, tid)
 		return
 	}
 
@@ -233,54 +227,96 @@ func (uts *Server) handlePacket(raddr net.Addr, b []byte) {
 		return
 	}
 
+	uts.processAction(raddr, action, tid, b)
+}
+
+// handleConnectionRequest processes connection establishment requests from clients.
+func (uts *Server) handleConnectionRequest(raddr net.Addr, tid uint32) {
+	if err := uts.handler.OnConnect(raddr); err != nil {
+		uts.sendError(raddr, tid, err.Error())
+		return
+	}
+
+	cid := uts.getConnectionID()
+	uts.addConnection(cid, raddr)
+	uts.sendConnResp(raddr, tid, cid)
+}
+
+// processAction handles different UDP tracker actions after connection validation.
+func (uts *Server) processAction(raddr net.Addr, action, tid uint32, b []byte) {
 	switch action {
 	case ActionAnnounce:
-		var req AnnounceRequest
-		if len(raddr.String()) < 16 { // For ipv4
-			if len(b) < 82 {
-				uts.sendError(raddr, tid, "invalid announce request")
-				return
-			}
-			req.DecodeFrom(b, 1)
-		} else if len(raddr.String()) >= 16 && len(raddr.String()) < 32 { // for ipv6
-			if len(b) < 94 {
-				uts.sendError(raddr, tid, "invalid announce request")
-				return
-			}
-			req.DecodeFrom(b, 0)
-		} else { // for cryptographic protocols
-			if len(b) < 110 {
-				uts.sendError(raddr, tid, "invalid announce request")
-				return
-			}
-			req.DecodeFrom(b, 0)
-		}
-
-		resp, err := uts.handler.OnAnnounce(raddr, req)
-		if err != nil {
-			uts.sendError(raddr, tid, err.Error())
-		} else {
-			uts.sendAnnounceResp(raddr, tid, resp)
-		}
+		uts.handleAnnounceAction(raddr, tid, b)
 	case ActionScrape:
-		_len := len(b)
-		infohashes := make([]metainfo.Hash, 0, _len/20)
-		for i, _len := 20, len(b); i <= _len; i += 20 {
-			infohashes = append(infohashes, metainfo.NewHash(b[i-20:i]))
-		}
-
-		if len(infohashes) == 0 {
-			uts.sendError(raddr, tid, "no infohash")
-			return
-		}
-
-		resps, err := uts.handler.OnScrap(raddr, infohashes)
-		if err != nil {
-			uts.sendError(raddr, tid, err.Error())
-		} else {
-			uts.sendScrapResp(raddr, tid, resps)
-		}
+		uts.handleScrapeAction(raddr, tid, b)
 	default:
 		uts.sendError(raddr, tid, "unkwnown action")
 	}
+}
+
+// handleAnnounceAction processes announce requests with protocol-specific decoding.
+func (uts *Server) handleAnnounceAction(raddr net.Addr, tid uint32, b []byte) {
+	req, err := uts.decodeAnnounceRequest(raddr, b)
+	if err != nil {
+		uts.sendError(raddr, tid, err.Error())
+		return
+	}
+
+	resp, err := uts.handler.OnAnnounce(raddr, req)
+	if err != nil {
+		uts.sendError(raddr, tid, err.Error())
+	} else {
+		uts.sendAnnounceResp(raddr, tid, resp)
+	}
+}
+
+// decodeAnnounceRequest decodes announce request based on address type and validates buffer size.
+func (uts *Server) decodeAnnounceRequest(raddr net.Addr, b []byte) (AnnounceRequest, error) {
+	var req AnnounceRequest
+	addrLen := len(raddr.String())
+
+	if addrLen < 16 { // For ipv4
+		if len(b) < 82 {
+			return req, fmt.Errorf("invalid announce request")
+		}
+		req.DecodeFrom(b, 1)
+	} else if addrLen >= 16 && addrLen < 32 { // for ipv6
+		if len(b) < 94 {
+			return req, fmt.Errorf("invalid announce request")
+		}
+		req.DecodeFrom(b, 0)
+	} else { // for cryptographic protocols
+		if len(b) < 110 {
+			return req, fmt.Errorf("invalid announce request")
+		}
+		req.DecodeFrom(b, 0)
+	}
+
+	return req, nil
+}
+
+// handleScrapeAction processes scrape requests by extracting infohashes and delegating to handler.
+func (uts *Server) handleScrapeAction(raddr net.Addr, tid uint32, b []byte) {
+	infohashes := uts.extractInfohashes(b)
+	if len(infohashes) == 0 {
+		uts.sendError(raddr, tid, "no infohash")
+		return
+	}
+
+	resps, err := uts.handler.OnScrap(raddr, infohashes)
+	if err != nil {
+		uts.sendError(raddr, tid, err.Error())
+	} else {
+		uts.sendScrapResp(raddr, tid, resps)
+	}
+}
+
+// extractInfohashes parses the buffer to extract all infohash values for scrape requests.
+func (uts *Server) extractInfohashes(b []byte) []metainfo.Hash {
+	_len := len(b)
+	infohashes := make([]metainfo.Hash, 0, _len/20)
+	for i, _len := 20, len(b); i <= _len; i += 20 {
+		infohashes = append(infohashes, metainfo.NewHash(b[i-20:i]))
+	}
+	return infohashes
 }
