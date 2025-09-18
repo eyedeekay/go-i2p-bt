@@ -518,45 +518,69 @@ func (d *Decoder) processDictKeyValuePairs(v, mapElem reflect.Value, isMap bool,
 	first := true
 
 	for {
-		// Check for end of dictionary
-		ch, err := d.peekByte()
-		if err != nil {
+		if isDictEnd, err := d.checkDictEnd(); err != nil {
 			return err
-		}
-		if ch == 'e' {
-			_, err = d.readByte() // consume the end token
-			return err
+		} else if isDictEnd {
+			return nil
 		}
 
-		key, err := d.readDictKey()
+		key, err := d.processNextDictKey(&lastKey, &first)
 		if err != nil {
 			return err
 		}
 
-		if err := d.validateKeyOrder(&lastKey, &first, key); err != nil {
+		if err := d.handleKeyValuePair(key, v, mapElem, isMap, vals); err != nil {
 			return err
-		}
-
-		subv, err := d.prepareValueTarget(key, mapElem, isMap, vals, v)
-		if err != nil {
-			return err
-		}
-
-		if !subv.IsValid() {
-			if err := d.skipInvalidValue(); err != nil {
-				return err
-			}
-			continue
-		}
-
-		if err := d.decodeInto(subv); err != nil {
-			return err
-		}
-
-		if isMap {
-			v.SetMapIndex(reflect.ValueOf(key), subv)
 		}
 	}
+}
+
+// checkDictEnd checks if the dictionary has reached its end marker.
+func (d *Decoder) checkDictEnd() (bool, error) {
+	ch, err := d.peekByte()
+	if err != nil {
+		return false, err
+	}
+	if ch == 'e' {
+		_, err = d.readByte() // consume the end token
+		return true, err
+	}
+	return false, nil
+}
+
+// processNextDictKey reads and validates the next dictionary key.
+func (d *Decoder) processNextDictKey(lastKey *string, first *bool) (string, error) {
+	key, err := d.readDictKey()
+	if err != nil {
+		return "", err
+	}
+
+	if err := d.validateKeyOrder(lastKey, first, key); err != nil {
+		return "", err
+	}
+
+	return key, nil
+}
+
+// handleKeyValuePair processes a complete key-value pair in the dictionary.
+func (d *Decoder) handleKeyValuePair(key string, v, mapElem reflect.Value, isMap bool, vals map[string]reflect.Value) error {
+	subv, err := d.prepareValueTarget(key, mapElem, isMap, vals, v)
+	if err != nil {
+		return err
+	}
+
+	if !subv.IsValid() {
+		return d.skipInvalidValue()
+	}
+
+	if err := d.decodeInto(subv); err != nil {
+		return err
+	}
+
+	if isMap {
+		v.SetMapIndex(reflect.ValueOf(key), subv)
+	}
+	return nil
 }
 
 // readDictKey reads and returns the next dictionary key.
