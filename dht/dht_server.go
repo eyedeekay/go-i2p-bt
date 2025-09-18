@@ -869,7 +869,7 @@ func (s *Server) AnnouncePeer(infohash metainfo.Hash, port uint16, impliedPort b
 // Notice: In general, it's used to bootstrap the routing table.
 func (s *Server) FindNode(addr net.Addr, target metainfo.Hash) error {
 	if target.IsZero() {
-		panic("the target is ZERO")
+		return fmt.Errorf("the target node id is ZERO")
 	}
 
 	return s.findNode(target, addr, s.conf.SearchDepth, nil)
@@ -917,7 +917,7 @@ func (s *Server) processFoundNodes(t *transaction, m krpc.Message) (found bool, 
 }
 
 // processFindNodeList processes a node list and checks for target node or new nodes to visit.
-func (s *Server) processFindNodeList(nodeList []krpc.Node, target metainfo.Hash, 
+func (s *Server) processFindNodeList(nodeList []krpc.Node, target metainfo.Hash,
 	ids metainfo.Hashes, readOnly bool, nodes *[]krpc.Node, updatedIds *metainfo.Hashes) bool {
 	var found bool
 
