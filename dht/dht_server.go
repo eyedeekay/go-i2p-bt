@@ -885,44 +885,60 @@ func (s *Server) findNode(target metainfo.Hash, addr net.Addr, depth int,
 }
 
 func (s *Server) onFindNodeResp(t *transaction, a net.Addr, m krpc.Message) {
-	// Search the target node recursively.
-	t.Depth--
-	if t.Depth < 1 {
+	if !s.shouldContinueDepthSearch(t) {
 		return
 	}
 
-	var found bool
-	ids := t.Visited
-	nodes := make([]krpc.Node, 0, len(m.R.Nodes)+len(m.R.Nodes6))
-	for _, node := range m.R.Nodes {
-		if node.ID == t.Arg.Target {
-			found = true
-		}
-		if ids.Contains(node.ID) {
-			continue
-		}
-		if s.addNode2(node, m.RO) == NodeAdded {
-			nodes = append(nodes, node)
-			ids = append(ids, node.ID)
-		}
-	}
-	for _, node := range m.R.Nodes6 {
-		if node.ID == t.Arg.Target {
-			found = true
-		}
-		if ids.Contains(node.ID) {
-			continue
-		}
-		if s.addNode2(node, m.RO) == NodeAdded {
-			nodes = append(nodes, node)
-			ids = append(ids, node.ID)
-		}
-	}
-
+	found, nodes, updatedIds := s.processFoundNodes(t, m)
 	if found || len(nodes) == 0 {
 		return
 	}
 
+	s.sendFindNodeQueries(t, nodes, updatedIds)
+}
+
+// shouldContinueDepthSearch decrements transaction depth and determines if search should continue.
+func (s *Server) shouldContinueDepthSearch(t *transaction) bool {
+	t.Depth--
+	return t.Depth >= 1
+}
+
+// processFoundNodes processes IPv4 and IPv6 nodes from find_node response.
+func (s *Server) processFoundNodes(t *transaction, m krpc.Message) (found bool, nodes []krpc.Node, updatedIds metainfo.Hashes) {
+	ids := t.Visited
+	nodes = make([]krpc.Node, 0, len(m.R.Nodes)+len(m.R.Nodes6))
+
+	found = s.processFindNodeList(m.R.Nodes, t.Arg.Target, ids, m.RO, &nodes, &ids)
+	if !found {
+		found = s.processFindNodeList(m.R.Nodes6, t.Arg.Target, ids, m.RO, &nodes, &ids)
+	}
+
+	return found, nodes, ids
+}
+
+// processFindNodeList processes a node list and checks for target node or new nodes to visit.
+func (s *Server) processFindNodeList(nodeList []krpc.Node, target metainfo.Hash, 
+	ids metainfo.Hashes, readOnly bool, nodes *[]krpc.Node, updatedIds *metainfo.Hashes) bool {
+	var found bool
+
+	for _, node := range nodeList {
+		if node.ID == target {
+			found = true
+		}
+		if ids.Contains(node.ID) {
+			continue
+		}
+		if s.addNode2(node, readOnly) == NodeAdded {
+			*nodes = append(*nodes, node)
+			*updatedIds = append(*updatedIds, node.ID)
+		}
+	}
+
+	return found
+}
+
+// sendFindNodeQueries sends find_node queries to all discovered nodes.
+func (s *Server) sendFindNodeQueries(t *transaction, nodes []krpc.Node, ids metainfo.Hashes) {
 	for _, node := range nodes {
 		err := s.findNode(t.Arg.Target, node.Addr.Addr(), t.Depth, ids)
 		if err != nil {
