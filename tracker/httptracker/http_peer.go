@@ -76,54 +76,75 @@ func (ps *Peers) UnmarshalBencode(b []byte) (err error) {
 
 	switch vs := v.(type) {
 	case string: // BEP 23
-		_len := len(vs)
-		if _len%6 != 0 {
-			return metainfo.ErrInvalidAddr
-		}
-
-		peers := make(Peers, 0, _len/6)
-		for i := 0; i < _len; i += 6 {
-			var addr metainfo.Address
-			addrBytes := []byte(vs[i : i+6])
-			if err = addr.UnmarshalBinary(addrBytes); err != nil {
-				return
-			}
-			peers = append(peers, Peer{IP: addr.IP.String(), Port: addr.Port})
-
-		}
-
-		*ps = peers
+		return ps.unmarshalCompactPeers(vs)
 	case []interface{}: // BEP 3
-		peers := make(Peers, len(vs))
-		for i, p := range vs {
-
-			m, ok := p.(map[string]interface{})
-			if !ok {
-				return errInvalidPeer
-			}
-
-			pid, ok := m["peer id"].(string)
-			if !ok {
-				return errInvalidPeer
-			}
-
-			ip, ok := m["ip"].(string)
-			if !ok {
-				return errInvalidPeer
-			}
-
-			port, ok := m["port"].(int64)
-			if !ok {
-				return errInvalidPeer
-			}
-
-			peers[i] = Peer{ID: pid, IP: ip, Port: uint16(port)}
-		}
-		*ps = peers
+		return ps.unmarshalDictPeers(vs)
 	default:
 		return errInvalidPeer
 	}
-	return
+}
+
+// unmarshalCompactPeers processes compact peer format (BEP 23).
+// It parses 6-byte peer entries containing 4-byte IP and 2-byte port.
+func (ps *Peers) unmarshalCompactPeers(data string) error {
+	_len := len(data)
+	if _len%6 != 0 {
+		return metainfo.ErrInvalidAddr
+	}
+
+	peers := make(Peers, 0, _len/6)
+	for i := 0; i < _len; i += 6 {
+		var addr metainfo.Address
+		addrBytes := []byte(data[i : i+6])
+		if err := addr.UnmarshalBinary(addrBytes); err != nil {
+			return err
+		}
+		peers = append(peers, Peer{IP: addr.IP.String(), Port: addr.Port})
+	}
+
+	*ps = peers
+	return nil
+}
+
+// unmarshalDictPeers processes dictionary peer format (BEP 3).
+// It parses peer entries with "peer id", "ip", and "port" fields.
+func (ps *Peers) unmarshalDictPeers(data []interface{}) error {
+	peers := make(Peers, len(data))
+	for i, p := range data {
+		peer, err := ps.extractPeerFromDict(p)
+		if err != nil {
+			return err
+		}
+		peers[i] = peer
+	}
+	*ps = peers
+	return nil
+}
+
+// extractPeerFromDict extracts a single peer from dictionary format.
+// It validates and extracts "peer id", "ip", and "port" fields.
+func (ps *Peers) extractPeerFromDict(p interface{}) (Peer, error) {
+	m, ok := p.(map[string]interface{})
+	if !ok {
+		return Peer{}, errInvalidPeer
+	}
+
+	pid, ok := m["peer id"].(string)
+	if !ok {
+		return Peer{}, errInvalidPeer
+	}
+
+	ip, ok := m["ip"].(string)
+	if !ok {
+		return Peer{}, errInvalidPeer
+	}
+
+	port, ok := m["port"].(int64)
+	if !ok {
+		return Peer{}, errInvalidPeer
+	}
+
+	return Peer{ID: pid, IP: ip, Port: uint16(port)}, nil
 }
 
 // MarshalBencode implements the interface bencode.Marshaler.
