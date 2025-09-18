@@ -309,67 +309,93 @@ func (d dictionary) Len() int           { return len(d) }
 func (d dictionary) Less(i, j int) bool { return d[i].key < d[j].key }
 func (d dictionary) Swap(i, j int)      { d[i], d[j] = d[j], d[i] }
 
+// readStruct processes struct fields and builds a dictionary for bencode encoding.
+// It handles field filtering, tag processing, and recursive struct embedding.
 func readStruct(dict dictionary, v reflect.Value) (dictionary, error) {
 	t := v.Type()
-	var (
-		fieldValue reflect.Value
-		rkey       string
-	)
 	for i := 0; i < t.NumField(); i++ {
 		key := t.Field(i)
-		rkey = key.Name
-		fieldValue = v.FieldByIndex(key.Index)
+		fieldValue := v.FieldByIndex(key.Index)
 
-		// filter out unexported values etc.
-		if !fieldValue.CanInterface() {
+		if !shouldProcessField(fieldValue) {
 			continue
 		}
 
-		// filter out nil pointer values
-		if isNilValue(fieldValue) {
+		rkey, shouldSkip, err := processFieldTag(key, fieldValue)
+		if err != nil {
+			return nil, err
+		}
+		if shouldSkip {
 			continue
 		}
 
-		// * Near identical to usage in JSON except with key 'bencode'
-		//
-		// * Struct values encode as BEncode dictionaries. Each exported
-		//   struct field becomes a set in the dictionary unless
-		//   - the field's tag is "-", or
-		//   - the field is empty and its tag specifies the "omitempty"
-		//     option.
-		//
-		// * The default key string is the struct field name but can be
-		//   specified in the struct field's tag value.  The "bencode"
-		//   key in struct field's tag value is the key name, followed
-		//   by an optional comma and options.
-		tagValue := key.Tag.Get("bencode")
-		if tagValue != "" {
-			// Keys with '-' are omit from output
-			if tagValue == "-" {
-				continue
-			}
-
-			name, options := parseTag(tagValue)
-			// Keys with 'omitempty' are omitted if the field is empty
-			if options.Contains("omitempty") && isEmptyValue(fieldValue) {
-				continue
-			}
-
-			// All other values are treated as the key string
-			if isValidTag(name) {
-				rkey = name
-			}
-		}
-
-		if key.Anonymous && key.Type.Kind() == reflect.Struct && tagValue == "" {
-			var err error
-			dict, err = readStruct(dict, fieldValue)
-			if err != nil {
-				return nil, err
-			}
-		} else {
-			dict = append(dict, definition{rkey, fieldValue})
+		dict, err = handleFieldValue(dict, key, fieldValue, rkey)
+		if err != nil {
+			return nil, err
 		}
 	}
 	return dict, nil
+}
+
+// shouldProcessField determines if a field should be processed for encoding.
+// Returns false for unexported fields or nil pointer values.
+func shouldProcessField(fieldValue reflect.Value) bool {
+	// filter out unexported values etc.
+	if !fieldValue.CanInterface() {
+		return false
+	}
+
+	// filter out nil pointer values
+	if isNilValue(fieldValue) {
+		return false
+	}
+
+	return true
+}
+
+// processFieldTag processes the bencode tag for a struct field and determines
+// the field key name and whether the field should be skipped.
+func processFieldTag(key reflect.StructField, fieldValue reflect.Value) (string, bool, error) {
+	rkey := key.Name
+	tagValue := key.Tag.Get("bencode")
+
+	if tagValue == "" {
+		return rkey, false, nil
+	}
+
+	// Keys with '-' are omit from output
+	if tagValue == "-" {
+		return "", true, nil
+	}
+
+	name, options := parseTag(tagValue)
+	// Keys with 'omitempty' are omitted if the field is empty
+	if options.Contains("omitempty") && isEmptyValue(fieldValue) {
+		return "", true, nil
+	}
+
+	// All other values are treated as the key string
+	if isValidTag(name) {
+		rkey = name
+	}
+
+	return rkey, false, nil
+}
+
+// handleFieldValue processes a single field value, handling both anonymous
+// struct embedding and regular field appending.
+func handleFieldValue(dict dictionary, key reflect.StructField, fieldValue reflect.Value, rkey string) (dictionary, error) {
+	tagValue := key.Tag.Get("bencode")
+	
+	if shouldEmbedAnonymousStruct(key, tagValue) {
+		return readStruct(dict, fieldValue)
+	}
+	
+	return append(dict, definition{rkey, fieldValue}), nil
+}
+
+// shouldEmbedAnonymousStruct determines if a field represents an anonymous
+// struct that should be embedded in the parent dictionary.
+func shouldEmbedAnonymousStruct(key reflect.StructField, tagValue string) bool {
+	return key.Anonymous && key.Type.Kind() == reflect.Struct && tagValue == ""
 }
