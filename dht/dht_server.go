@@ -173,6 +173,15 @@ func (c *Config) set(conf ...Config) {
 		*c = conf[0]
 	}
 
+	c.setBasicDefaults()
+	c.setNetworkDefaults()
+	c.setStorageDefaults()
+	c.setCallbackDefaults()
+	c.setMessageHandlerDefaults()
+}
+
+// setBasicDefaults configures basic DHT server parameters with their default values.
+func (c *Config) setBasicDefaults() {
 	if c.K <= 0 {
 		c.K = 8
 	}
@@ -185,24 +194,40 @@ func (c *Config) set(conf ...Config) {
 	if c.ErrorLog == nil {
 		c.ErrorLog = log.Printf
 	}
+}
+
+// setNetworkDefaults configures network-related parameters with their default values.
+func (c *Config) setNetworkDefaults() {
 	if c.SearchDepth < 1 {
 		c.SearchDepth = 8
 	}
+	if c.RespTimeout == 0 {
+		c.RespTimeout = time.Second * 10
+	}
+}
+
+// setStorageDefaults configures storage and management components with their default values.
+func (c *Config) setStorageDefaults() {
 	if c.RoutingTableStorage == nil {
 		c.RoutingTableStorage = noopStorage{}
 	}
 	if c.Blacklist == nil {
 		c.Blacklist = NewMemoryBlacklist(1024, time.Hour*24*7)
 	}
-	if c.RespTimeout == 0 {
-		c.RespTimeout = time.Second * 10
-	}
+}
+
+// setCallbackDefaults configures callback functions with their default values.
+func (c *Config) setCallbackDefaults() {
 	if c.OnSearch == nil {
 		c.OnSearch = func(string, net.Addr) {}
 	}
 	if c.OnTorrent == nil {
 		c.OnTorrent = func(string, net.Addr) {}
 	}
+}
+
+// setMessageHandlerDefaults configures message handler functions with their default values.
+func (c *Config) setMessageHandlerDefaults() {
 	if c.HandleInMessage == nil {
 		c.HandleInMessage = c.in
 	}
