@@ -465,28 +465,48 @@ func (s *Server) handleMessage(raddr net.Addr, m krpc.Message) {
 
 	switch m.Y {
 	case "q":
-		if !m.A.ID.IsZero() {
-			r := s.addNode(raddr, m.A.ID, m.RO)
-			if r != NodeExistAndChanged && !s.conf.ReadOnly { // BEP 43
-				s.handleQuery(raddr, m)
-			}
-		}
+		s.handleQueryMessage(raddr, m)
 	case "r":
-		if !m.R.ID.IsZero() {
-			if s.addNode(raddr, m.R.ID, m.RO) == NodeExistAndChanged {
-				return
-			}
-
-			if t := s.transactionManager.PopTransaction(m.T, raddr); t != nil {
-				t.OnResponse(t, raddr, m)
-			}
-		}
+		s.handleResponseMessage(raddr, m)
 	case "e":
-		if t := s.transactionManager.PopTransaction(m.T, raddr); t != nil {
-			t.OnError(t, m.E.Code, m.E.Reason)
-		}
+		s.handleErrorMessage(raddr, m)
 	default:
 		s.conf.ErrorLog("unknown dht message type '%s'", m.Y)
+	}
+}
+
+// handleQueryMessage processes incoming DHT query messages.
+func (s *Server) handleQueryMessage(raddr net.Addr, m krpc.Message) {
+	if !m.A.ID.IsZero() {
+		r := s.addNode(raddr, m.A.ID, m.RO)
+		if r != NodeExistAndChanged && !s.conf.ReadOnly { // BEP 43
+			s.handleQuery(raddr, m)
+		}
+	}
+}
+
+// handleResponseMessage processes incoming DHT response messages.
+func (s *Server) handleResponseMessage(raddr net.Addr, m krpc.Message) {
+	if !m.R.ID.IsZero() {
+		if s.addNode(raddr, m.R.ID, m.RO) == NodeExistAndChanged {
+			return
+		}
+
+		s.processTransaction(raddr, m)
+	}
+}
+
+// handleErrorMessage processes incoming DHT error messages.
+func (s *Server) handleErrorMessage(raddr net.Addr, m krpc.Message) {
+	if t := s.transactionManager.PopTransaction(m.T, raddr); t != nil {
+		t.OnError(t, m.E.Code, m.E.Reason)
+	}
+}
+
+// processTransaction retrieves and executes the response handler for a completed transaction.
+func (s *Server) processTransaction(raddr net.Addr, m krpc.Message) {
+	if t := s.transactionManager.PopTransaction(m.T, raddr); t != nil {
+		t.OnResponse(t, raddr, m)
 	}
 }
 
