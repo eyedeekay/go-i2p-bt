@@ -231,32 +231,53 @@ func (d *TorrentDownloader) processMetadataExchange(conn *pp.PeerConn, host stri
 	var piecesNum int
 	var metadataSize int
 	var utmetadataID uint8
-	var msg pp.Message
-	var err error
 
+	return d.runMetadataExchangeLoop(conn, host, port, infohash, &pieces, &piecesNum, &metadataSize, &utmetadataID)
+}
+
+// runMetadataExchangeLoop executes the main message processing loop for metadata exchange.
+func (d *TorrentDownloader) runMetadataExchangeLoop(conn *pp.PeerConn, host string, port uint16, infohash metainfo.Hash, pieces *[][]byte, piecesNum *int, metadataSize *int, utmetadataID *uint8) error {
 	for {
-		if msg, err = conn.ReadMsg(); err != nil {
+		msg, err := d.readNextMessage(conn)
+		if err != nil {
 			return err
-		}
-
-		select {
-		case <-d.exit:
-			return nil
-		default:
 		}
 
 		if msg.Keepalive {
 			continue
 		}
 
-		if err = d.handleMessage(msg, host, &pieces, &piecesNum, &metadataSize, &utmetadataID, conn, port, infohash); err != nil {
+		if err = d.handleMessage(msg, host, pieces, piecesNum, metadataSize, utmetadataID, conn, port, infohash); err != nil {
 			return err
 		}
 
-		if pieces != nil && d.isMetadataComplete(pieces) {
-			return d.finalizeMetadata(pieces, host, port, conn.PeerID, infohash)
+		if err = d.checkAndFinalizeMetadata(*pieces, host, port, conn.PeerID, infohash); err != nil {
+			return err
 		}
 	}
+}
+
+// readNextMessage reads the next message from the connection with exit handling.
+func (d *TorrentDownloader) readNextMessage(conn *pp.PeerConn) (pp.Message, error) {
+	msg, err := conn.ReadMsg()
+	if err != nil {
+		return msg, err
+	}
+
+	select {
+	case <-d.exit:
+		return msg, fmt.Errorf("downloader exit requested")
+	default:
+		return msg, nil
+	}
+}
+
+// checkAndFinalizeMetadata checks if metadata is complete and finalizes it if ready.
+func (d *TorrentDownloader) checkAndFinalizeMetadata(pieces [][]byte, host string, port uint16, peerID, infohash metainfo.Hash) error {
+	if pieces != nil && d.isMetadataComplete(pieces) {
+		return d.finalizeMetadata(pieces, host, port, peerID, infohash)
+	}
+	return nil
 }
 
 // handleMessage processes individual messages during metadata exchange.
