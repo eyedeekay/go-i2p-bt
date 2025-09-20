@@ -60,19 +60,29 @@ func (tpm *tokenPeerManager) Start(interval time.Duration) {
 		case <-tpm.exit:
 			return
 		case now := <-tick.C:
-			tpm.lock.Lock()
-			for id, peers := range tpm.peers {
-				for addr, peer := range peers {
-					if now.Sub(peer.Time) > interval {
-						delete(peers, addr)
-					}
-				}
+			tpm.cleanupExpiredPeers(now, interval)
+		}
+	}
+}
 
-				if len(peers) == 0 {
-					delete(tpm.peers, id)
-				}
-			}
-			tpm.lock.Unlock()
+// cleanupExpiredPeers removes expired peers and empty peer maps from the manager.
+func (tpm *tokenPeerManager) cleanupExpiredPeers(now time.Time, interval time.Duration) {
+	tpm.lock.Lock()
+	defer tpm.lock.Unlock()
+	
+	for id, peers := range tpm.peers {
+		tpm.removeExpiredPeersFromMap(peers, now, interval)
+		if len(peers) == 0 {
+			delete(tpm.peers, id)
+		}
+	}
+}
+
+// removeExpiredPeersFromMap removes expired peers from a specific peer map.
+func (tpm *tokenPeerManager) removeExpiredPeersFromMap(peers map[string]peer, now time.Time, interval time.Duration) {
+	for addr, peer := range peers {
+		if now.Sub(peer.Time) > interval {
+			delete(peers, addr)
 		}
 	}
 }
