@@ -244,11 +244,24 @@ func (d *Decoder) dispatchDecodeByType(v reflect.Value) error {
 	}
 }
 
+// decodeInt reads and decodes a bencode integer value into the provided reflect.Value.
+// It handles integer token validation, digit extraction, and type-specific assignment
+// for all supported integer, unsigned integer, boolean, and interface types.
 func (d *Decoder) decodeInt(v reflect.Value) error {
-	// we need to read an i, some digits, and an e.
-	ch, err := d.readByte()
+	digits, err := d.readIntegerDigits()
 	if err != nil {
 		return err
+	}
+
+	return d.assignIntegerValue(v, digits)
+}
+
+// readIntegerDigits validates the integer token format and extracts the digit string.
+// It ensures the input starts with 'i' and ends with 'e', returning the digits between.
+func (d *Decoder) readIntegerDigits() (string, error) {
+	ch, err := d.readByte()
+	if err != nil {
+		return "", err
 	}
 	if ch != 'i' {
 		panic("got not an i when peek returned an i")
@@ -256,40 +269,71 @@ func (d *Decoder) decodeInt(v reflect.Value) error {
 
 	line, err := d.readBytes('e')
 	if err != nil || d.raw {
-		return err
+		return "", err
 	}
 
-	digits := string(line[:len(line)-1])
+	return string(line[:len(line)-1]), nil
+}
+
+// assignIntegerValue converts the digit string to the appropriate type and assigns it
+// to the reflect.Value based on its kind (interface, signed/unsigned integers, bool).
+func (d *Decoder) assignIntegerValue(v reflect.Value, digits string) error {
+	if !v.IsValid() {
+		// For invalid values (e.g., during raw message processing), no assignment needed
+		return nil
+	}
 
 	switch v.Kind() {
 	default:
 		return fmt.Errorf("Cannot store int64 into %s", v.Type())
 	case reflect.Interface:
-		n, err := strconv.ParseInt(digits, 10, 64)
-		if err != nil {
-			return err
-		}
-		v.Set(reflect.ValueOf(n))
+		return d.assignToInterface(v, digits)
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		n, err := strconv.ParseInt(digits, 10, 64)
-		if err != nil {
-			return err
-		}
-		v.SetInt(n)
+		return d.assignToSignedInt(v, digits)
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		n, err := strconv.ParseUint(digits, 10, 64)
-		if err != nil {
-			return err
-		}
-		v.SetUint(n)
+		return d.assignToUnsignedInt(v, digits)
 	case reflect.Bool:
-		n, err := strconv.ParseUint(digits, 10, 64)
-		if err != nil {
-			return err
-		}
-		v.SetBool(n != 0)
+		return d.assignToBool(v, digits)
 	}
+}
 
+// assignToInterface parses the digits as int64 and assigns to an interface{} value.
+func (d *Decoder) assignToInterface(v reflect.Value, digits string) error {
+	n, err := strconv.ParseInt(digits, 10, 64)
+	if err != nil {
+		return err
+	}
+	v.Set(reflect.ValueOf(n))
+	return nil
+}
+
+// assignToSignedInt parses the digits as int64 and assigns to signed integer types.
+func (d *Decoder) assignToSignedInt(v reflect.Value, digits string) error {
+	n, err := strconv.ParseInt(digits, 10, 64)
+	if err != nil {
+		return err
+	}
+	v.SetInt(n)
+	return nil
+}
+
+// assignToUnsignedInt parses the digits as uint64 and assigns to unsigned integer types.
+func (d *Decoder) assignToUnsignedInt(v reflect.Value, digits string) error {
+	n, err := strconv.ParseUint(digits, 10, 64)
+	if err != nil {
+		return err
+	}
+	v.SetUint(n)
+	return nil
+}
+
+// assignToBool parses the digits as uint64 and assigns the boolean result (non-zero = true).
+func (d *Decoder) assignToBool(v reflect.Value, digits string) error {
+	n, err := strconv.ParseUint(digits, 10, 64)
+	if err != nil {
+		return err
+	}
+	v.SetBool(n != 0)
 	return nil
 }
 
