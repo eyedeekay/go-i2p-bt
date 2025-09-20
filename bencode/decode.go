@@ -165,6 +165,9 @@ func indirect(v reflect.Value, alloc bool) reflect.Value {
 	}
 }
 
+// decodeInto decodes a bencode value into the provided reflect.Value.
+// It handles special unmarshaler interfaces, raw message processing, and
+// dispatches to appropriate type-specific decode methods.
 func (d *Decoder) decodeInto(val reflect.Value) (err error) {
 	var v reflect.Value
 	if d.raw {
@@ -216,25 +219,29 @@ func (d *Decoder) decodeInto(val reflect.Value) (err error) {
 		}
 	}
 
+	return d.dispatchDecodeByType(v)
+}
+
+// dispatchDecodeByType examines the next byte and dispatches to the appropriate
+// type-specific decode method based on bencode format markers.
+func (d *Decoder) dispatchDecodeByType(v reflect.Value) error {
 	next, err := d.peekByte()
 	if err != nil {
-		return
+		return err
 	}
 
 	switch next {
 	case 'i':
-		err = d.decodeInt(v)
+		return d.decodeInt(v)
 	case '0', '1', '2', '3', '4', '5', '6', '7', '8', '9':
-		err = d.decodeString(v)
+		return d.decodeString(v)
 	case 'l':
-		err = d.decodeList(v)
+		return d.decodeList(v)
 	case 'd':
-		err = d.decodeDict(v)
+		return d.decodeDict(v)
 	default:
-		err = errors.New("Invalid input")
+		return errors.New("invalid input")
 	}
-
-	return
 }
 
 func (d *Decoder) decodeInt(v reflect.Value) error {
