@@ -183,49 +183,66 @@ func (utc *Client) announce(ctx context.Context, req AnnounceRequest) (
 	}
 
 	tid := utc.getTranID()
-	buf := bytes.NewBuffer(make([]byte, 0, 110))
-	binary.Write(buf, binary.BigEndian, cid)
-	binary.Write(buf, binary.BigEndian, ActionAnnounce)
-	binary.Write(buf, binary.BigEndian, tid)
-	req.EncodeTo(buf)
-	b := buf.Bytes()
-	if err = utc.send(b); err != nil {
+	if err = utc.sendAnnounceRequest(cid, tid, req); err != nil {
 		return
 	}
 
-	data := make([]byte, utc.conf.MaxBufSize)
-	n, err := utc.readResp(ctx, data)
+	data, err := utc.readAnnounceResponse(ctx)
 	if err != nil {
 		return
-	} else if n < 8 {
-		err = io.ErrShortBuffer
-		return
 	}
 
-	data = data[:n]
-	switch binary.BigEndian.Uint32(data[:4]) {
-	case ActionAnnounce:
-	case ActionError:
-		_, reason := utc.parseError(data[4:])
-		err = errors.New(reason)
-		return
-	default:
-		err = errors.New("tracker response not connect action")
-		return
-	}
-
-	if n < 16 {
-		err = io.ErrShortBuffer
-		return
-	}
-
-	if binary.BigEndian.Uint32(data[4:8]) != tid {
-		err = errors.New("invalid transaction id")
+	if err = utc.validateAnnounceResponse(data, tid); err != nil {
 		return
 	}
 
 	r.DecodeFrom(data[8:], utc.ipv4)
 	return
+}
+
+// sendAnnounceRequest constructs and sends the UDP announce request with connection ID, transaction ID, and request data.
+func (utc *Client) sendAnnounceRequest(cid uint64, tid uint32, req AnnounceRequest) error {
+	buf := bytes.NewBuffer(make([]byte, 0, 110))
+	binary.Write(buf, binary.BigEndian, cid)
+	binary.Write(buf, binary.BigEndian, ActionAnnounce)
+	binary.Write(buf, binary.BigEndian, tid)
+	req.EncodeTo(buf)
+	return utc.send(buf.Bytes())
+}
+
+// readAnnounceResponse reads and performs initial validation of the announce response from the UDP tracker.
+func (utc *Client) readAnnounceResponse(ctx context.Context) ([]byte, error) {
+	data := make([]byte, utc.conf.MaxBufSize)
+	n, err := utc.readResp(ctx, data)
+	if err != nil {
+		return nil, err
+	}
+	if n < 8 {
+		return nil, io.ErrShortBuffer
+	}
+	return data[:n], nil
+}
+
+// validateAnnounceResponse validates the announce response action type and transaction ID.
+func (utc *Client) validateAnnounceResponse(data []byte, expectedTid uint32) error {
+	switch binary.BigEndian.Uint32(data[:4]) {
+	case ActionAnnounce:
+		// Valid announce response
+	case ActionError:
+		_, reason := utc.parseError(data[4:])
+		return errors.New(reason)
+	default:
+		return errors.New("tracker response not connect action")
+	}
+
+	if len(data) < 16 {
+		return io.ErrShortBuffer
+	}
+
+	if binary.BigEndian.Uint32(data[4:8]) != expectedTid {
+		return errors.New("invalid transaction id")
+	}
+	return nil
 }
 
 // Announce sends a Announce request to the tracker.
