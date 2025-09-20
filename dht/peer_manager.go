@@ -69,7 +69,7 @@ func (tpm *tokenPeerManager) Start(interval time.Duration) {
 func (tpm *tokenPeerManager) cleanupExpiredPeers(now time.Time, interval time.Duration) {
 	tpm.lock.Lock()
 	defer tpm.lock.Unlock()
-	
+
 	for id, peers := range tpm.peers {
 		tpm.removeExpiredPeersFromMap(peers, now, interval)
 		if len(peers) == 0 {
