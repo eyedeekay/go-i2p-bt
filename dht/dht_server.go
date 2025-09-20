@@ -255,27 +255,27 @@ type Server struct {
 	transactionManager *transactionManager
 }
 
-// NewServer returns a new DHT server.
-func NewServer(conn net.PacketConn, config ...Config) *Server {
-	var conf Config
-	conf.set(config...)
-
-	if len(conf.IPProtocols) == 0 {
-		host, _, err := net.SplitHostPort(conn.LocalAddr().String())
-		if err != nil {
-			panic(err)
-		} else if ip := net.ParseIP(host); utils.IpIsZero(ip) {
-			conf.IPProtocols = []IPProtocolStack{IPv4Protocol, IPv6Protocol}
-		} else if ip.To4() != nil {
-			conf.IPProtocols = []IPProtocolStack{IPv4Protocol}
-		} else {
-			conf.IPProtocols = []IPProtocolStack{IPv6Protocol}
-		}
+// detectIPProtocols automatically detects supported IP protocols based on connection address.
+// It returns the IP protocol slice to use for the DHT server configuration.
+func detectIPProtocols(conn net.PacketConn) []IPProtocolStack {
+	host, _, err := net.SplitHostPort(conn.LocalAddr().String())
+	if err != nil {
+		panic(err)
+	} else if ip := net.ParseIP(host); utils.IpIsZero(ip) {
+		return []IPProtocolStack{IPv4Protocol, IPv6Protocol}
+	} else if ip.To4() != nil {
+		return []IPProtocolStack{IPv4Protocol}
+	} else {
+		return []IPProtocolStack{IPv6Protocol}
 	}
+}
 
+// buildWantAndFlags processes IP protocols configuration and builds the want slice and IP flags.
+// It returns IPv4 flag, IPv6 flag, and the want slice for DHT queries.
+func buildWantAndFlags(ipProtocols []IPProtocolStack) (bool, bool, []krpc.Want) {
 	var ipv4, ipv6 bool
 	var want []krpc.Want
-	for _, ip := range conf.IPProtocols {
+	for _, ip := range ipProtocols {
 		switch ip {
 		case IPv4Protocol:
 			ipv4 = true
@@ -285,7 +285,12 @@ func NewServer(conn net.PacketConn, config ...Config) *Server {
 			want = append(want, krpc.WantNodes6)
 		}
 	}
+	return ipv4, ipv6, want
+}
 
+// initializeServer creates and configures a new Server instance with all its components.
+// It sets up routing tables and assigns the peer manager.
+func initializeServer(conf Config, conn net.PacketConn, ipv4, ipv6 bool, want []krpc.Want) *Server {
 	s := &Server{
 		ipv4:               ipv4,
 		ipv6:               ipv6,
@@ -306,6 +311,19 @@ func NewServer(conn net.PacketConn, config ...Config) *Server {
 	}
 
 	return s
+}
+
+// NewServer returns a new DHT server.
+func NewServer(conn net.PacketConn, config ...Config) *Server {
+	var conf Config
+	conf.set(config...)
+
+	if len(conf.IPProtocols) == 0 {
+		conf.IPProtocols = detectIPProtocols(conn)
+	}
+
+	ipv4, ipv6, want := buildWantAndFlags(conf.IPProtocols)
+	return initializeServer(conf, conn, ipv4, ipv6, want)
 }
 
 // ID returns the ID of the DHT server node.
