@@ -33,45 +33,45 @@ type GetPeersResult struct {
 	Resp    AnnounceResponse
 }
 
-// GetPeers gets the peers from the trackers.
-//
-// Notice: the returned chan will be closed when all the requests end.
-func GetPeers(ctx context.Context, id, infohash metainfo.Hash, trackers []string) []GetPeersResult {
-	if len(trackers) == 0 {
-		return nil
-	}
-
+// normalizeTrackerURLs ensures all tracker URLs have the proper /announce path.
+func normalizeTrackerURLs(trackers []string) {
 	for i, t := range trackers {
 		if u, err := url.Parse(t); err == nil && u.Path == "" {
 			u.Path = "/announce"
 			trackers[i] = u.String()
 		}
 	}
+}
 
-	_len := len(trackers)
-	wlen := _len
+// calculateWorkerCount determines the optimal number of workers for tracker requests.
+func calculateWorkerCount(trackerCount int) int {
+	wlen := trackerCount
 	if wlen > 10 {
 		wlen = 10
 	}
+	return wlen
+}
 
-	reqs := make(chan string, wlen)
+// createRequestChannel creates and populates a channel with tracker URLs.
+func createRequestChannel(trackers []string, workerCount int) chan string {
+	reqs := make(chan string, workerCount)
 	go func() {
-		for i := 0; i < _len; i++ {
+		for i := 0; i < len(trackers); i++ {
 			reqs <- trackers[i]
 		}
 	}()
+	return reqs
+}
 
-	wg := new(sync.WaitGroup)
-	wg.Add(_len)
-
-	var lock sync.Mutex
-	results := make([]GetPeersResult, 0, _len)
-	for i := 0; i < wlen; i++ {
+// spawnWorkerRoutines creates worker goroutines to process tracker requests concurrently.
+func spawnWorkerRoutines(ctx context.Context, workerCount int, reqs chan string,
+	wg *sync.WaitGroup, id, infohash metainfo.Hash, lock *sync.Mutex, results *[]GetPeersResult) {
+	for i := 0; i < workerCount; i++ {
 		go func() {
 			for tracker := range reqs {
 				resp, err := getPeers(ctx, wg, tracker, id, infohash)
 				lock.Lock()
-				results = append(results, GetPeersResult{
+				*results = append(*results, GetPeersResult{
 					Tracker: tracker,
 					Error:   err,
 					Resp:    resp,
@@ -80,6 +80,30 @@ func GetPeers(ctx context.Context, id, infohash metainfo.Hash, trackers []string
 			}
 		}()
 	}
+}
+
+// GetPeers gets the peers from the trackers.
+//
+// Notice: the returned chan will be closed when all the requests end.
+func GetPeers(ctx context.Context, id, infohash metainfo.Hash, trackers []string) []GetPeersResult {
+	if len(trackers) == 0 {
+		return nil
+	}
+
+	normalizeTrackerURLs(trackers)
+
+	trackerCount := len(trackers)
+	workerCount := calculateWorkerCount(trackerCount)
+
+	reqs := createRequestChannel(trackers, workerCount)
+
+	wg := new(sync.WaitGroup)
+	wg.Add(trackerCount)
+
+	var lock sync.Mutex
+	results := make([]GetPeersResult, 0, trackerCount)
+
+	spawnWorkerRoutines(ctx, workerCount, reqs, wg, id, infohash, &lock, &results)
 
 	wg.Wait()
 	close(reqs)
