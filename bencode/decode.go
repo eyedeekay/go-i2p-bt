@@ -660,35 +660,56 @@ func setStructValues(m map[string]reflect.Value, v reflect.Value) {
 		return
 	}
 
-	// do embedded fields first
-	for i := 0; i < v.NumField(); i++ {
-		f := t.Field(i)
-		if f.PkgPath != "" {
-			continue
-		}
-		v := v.FieldByIndex(f.Index)
-		if f.Anonymous && f.Tag == "" {
-			setStructValues(m, v)
-		}
-	}
+	// Process embedded fields first to establish base mapping
+	processEmbeddedFields(m, v)
 
-	// overwrite embedded struct tags and names
+	// Process regular fields, overwriting embedded field mappings as needed
+	processRegularFields(m, v)
+}
+
+// processEmbeddedFields handles the recursive processing of embedded struct fields.
+// It iterates through all fields looking for anonymous embedded structs without tags
+// and recursively processes them to build the field mapping.
+func processEmbeddedFields(m map[string]reflect.Value, v reflect.Value) {
 	for i := 0; i < v.NumField(); i++ {
-		f := t.Field(i)
+		f := v.Type().Field(i)
 		if f.PkgPath != "" {
 			continue
 		}
-		v := v.FieldByIndex(f.Index)
-		name, _ := parseTag(f.Tag.Get("bencode"))
-		if name == "" {
-			if f.Anonymous {
-				// it's a struct and its fields have already been added to the map
-				continue
-			}
-			name = f.Name
-		}
-		if isValidTag(name) {
-			m[name] = v
+		fieldValue := v.FieldByIndex(f.Index)
+		if f.Anonymous && f.Tag == "" {
+			setStructValues(m, fieldValue)
 		}
 	}
+}
+
+// processRegularFields processes all struct fields to extract field names and map them
+// to their reflection values. It handles both tagged and untagged fields, with tagged
+// fields taking precedence over embedded field mappings.
+func processRegularFields(m map[string]reflect.Value, v reflect.Value) {
+	for i := 0; i < v.NumField(); i++ {
+		f := v.Type().Field(i)
+		if f.PkgPath != "" {
+			continue
+		}
+		fieldValue := v.FieldByIndex(f.Index)
+		name := extractFieldName(f)
+		if name != "" && isValidTag(name) {
+			m[name] = fieldValue
+		}
+	}
+}
+
+// extractFieldName determines the appropriate field name from struct field information.
+// It processes bencode tags and handles anonymous fields according to bencode conventions.
+func extractFieldName(f reflect.StructField) string {
+	name, _ := parseTag(f.Tag.Get("bencode"))
+	if name == "" {
+		if f.Anonymous {
+			// Anonymous fields without tags have already been processed
+			return ""
+		}
+		name = f.Name
+	}
+	return name
 }
