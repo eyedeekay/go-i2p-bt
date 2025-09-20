@@ -689,7 +689,7 @@ func (d *Decoder) prepareAddressableValue(v reflect.Value) reflect.Value {
 func (d *Decoder) navigateValueChain(v reflect.Value) (Unmarshaler, encoding.TextUnmarshaler, reflect.Value) {
 	for {
 		v = d.dereferenceInterface(v)
-		
+
 		if v.Kind() != reflect.Ptr || v.IsNil() {
 			break
 		}
