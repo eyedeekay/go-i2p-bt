@@ -838,10 +838,26 @@ func (s *Server) Ping(addr net.Addr, cb ...func(Result)) (err error) {
 // If cb is given, it will be called when some peers are returned.
 // Notice: it may be called for many times.
 func (s *Server) GetPeers(infohash metainfo.Hash, cb ...func(Result)) {
+	s.validateInfohash(infohash)
+	nodes := s.collectClosestNodes(infohash)
+
+	if !s.handleEmptyNodes(nodes, cb) {
+		return
+	}
+
+	ids := s.extractNodeIDs(nodes)
+	s.distributeGetPeersRequests(infohash, nodes, ids, cb)
+}
+
+// validateInfohash checks if the infohash is valid and panics if it's zero.
+func (s *Server) validateInfohash(infohash metainfo.Hash) {
 	if infohash.IsZero() {
 		panic("the infohash of the torrent is ZERO")
 	}
+}
 
+// collectClosestNodes gathers the closest nodes from both IPv4 and IPv6 routing tables.
+func (s *Server) collectClosestNodes(infohash metainfo.Hash) []krpc.Node {
 	var nodes []krpc.Node
 	if s.ipv4 {
 		nodes = s.routingTable4.Closest(infohash, s.conf.K)
@@ -849,19 +865,31 @@ func (s *Server) GetPeers(infohash metainfo.Hash, cb ...func(Result)) {
 	if s.ipv6 {
 		nodes = append(nodes, s.routingTable6.Closest(infohash, s.conf.K)...)
 	}
+	return nodes
+}
 
+// handleEmptyNodes processes the case when no nodes are found and returns whether to continue.
+func (s *Server) handleEmptyNodes(nodes []krpc.Node, cb []func(Result)) bool {
 	if len(nodes) == 0 {
 		if len(cb) != 0 && cb[0] != nil {
 			cb[0](Result{})
 		}
-		return
+		return false
 	}
+	return true
+}
 
+// extractNodeIDs creates a slice of node IDs from the provided nodes.
+func (s *Server) extractNodeIDs(nodes []krpc.Node) metainfo.Hashes {
 	ids := make(metainfo.Hashes, len(nodes))
 	for i, node := range nodes {
 		ids[i] = node.ID
 	}
+	return ids
+}
 
+// distributeGetPeersRequests sends getPeers requests to all provided nodes.
+func (s *Server) distributeGetPeersRequests(infohash metainfo.Hash, nodes []krpc.Node, ids metainfo.Hashes, cb []func(Result)) {
 	for _, node := range nodes {
 		s.getPeers(infohash, node.Addr, s.conf.SearchDepth, ids, cb...)
 	}
