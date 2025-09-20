@@ -244,12 +244,41 @@ func (utc *Client) Announce(c context.Context, r *AnnounceRequest) (AnnounceResp
 
 func (utc *Client) scrape(c context.Context, ihs []metainfo.Hash) (
 	rs []ScrapeResponse, err error) {
-	cid, err := utc.getConnectionID(c)
+	cid, tid, err := utc.setupScrapeConnection(c)
 	if err != nil {
 		return
 	}
 
-	tid := utc.getTranID()
+	requestData := utc.buildScrapeRequest(cid, tid, ihs)
+	if err = utc.send(requestData); err != nil {
+		return
+	}
+
+	responseData, err := utc.readScrapeResponse(c)
+	if err != nil {
+		return
+	}
+
+	if err = utc.validateScrapeResponse(responseData, tid); err != nil {
+		return
+	}
+
+	rs = utc.parseScrapeResults(responseData[8:])
+	return
+}
+
+// setupScrapeConnection establishes connection and generates transaction ID for scrape request.
+func (utc *Client) setupScrapeConnection(c context.Context) (cid uint64, tid uint32, err error) {
+	cid, err = utc.getConnectionID(c)
+	if err != nil {
+		return
+	}
+	tid = utc.getTranID()
+	return
+}
+
+// buildScrapeRequest constructs the UDP scrape request buffer with connection ID, action, transaction ID, and infohashes.
+func (utc *Client) buildScrapeRequest(cid uint64, tid uint32, ihs []metainfo.Hash) []byte {
 	buf := bytes.NewBuffer(make([]byte, 0, 16+len(ihs)*20))
 	binary.Write(buf, binary.BigEndian, cid)
 	binary.Write(buf, binary.BigEndian, ActionScrape)
@@ -257,46 +286,50 @@ func (utc *Client) scrape(c context.Context, ihs []metainfo.Hash) (
 	for _, h := range ihs {
 		buf.Write(h[:])
 	}
-	if err = utc.send(buf.Bytes()); err != nil {
-		return
-	}
+	return buf.Bytes()
+}
 
+// readScrapeResponse reads and validates the initial response from the UDP tracker.
+func (utc *Client) readScrapeResponse(c context.Context) ([]byte, error) {
 	data := make([]byte, utc.conf.MaxBufSize)
 	n, err := utc.readResp(c, data)
 	if err != nil {
-		return
-	} else if n < 8 {
-		err = io.ErrShortBuffer
-		return
+		return nil, err
 	}
+	if n < 8 {
+		return nil, io.ErrShortBuffer
+	}
+	return data[:n], nil
+}
 
-	data = data[:n]
+// validateScrapeResponse validates the response action type and transaction ID.
+func (utc *Client) validateScrapeResponse(data []byte, expectedTid uint32) error {
 	switch binary.BigEndian.Uint32(data[:4]) {
 	case ActionScrape:
+		// Valid scrape response
 	case ActionError:
 		_, reason := utc.parseError(data[4:])
-		err = errors.New(reason)
-		return
+		return errors.New(reason)
 	default:
-		err = errors.New("tracker response not connect action")
-		return
+		return errors.New("tracker response not connect action")
 	}
 
-	if binary.BigEndian.Uint32(data[4:8]) != tid {
-		err = errors.New("invalid transaction id")
-		return
+	if binary.BigEndian.Uint32(data[4:8]) != expectedTid {
+		return errors.New("invalid transaction id")
 	}
+	return nil
+}
 
-	data = data[8:]
+// parseScrapeResults converts raw response data into structured ScrapeResponse objects.
+func (utc *Client) parseScrapeResults(data []byte) []ScrapeResponse {
 	_len := len(data)
-	rs = make([]ScrapeResponse, 0, _len/12)
+	rs := make([]ScrapeResponse, 0, _len/12)
 	for i := 12; i <= _len; i += 12 {
 		var r ScrapeResponse
 		r.DecodeFrom(data[i-12 : i])
 		rs = append(rs, r)
 	}
-
-	return
+	return rs
 }
 
 // Scrape sends a Scrape request to the tracker.
