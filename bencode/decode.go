@@ -671,38 +671,61 @@ func (d *Decoder) skipInvalidValue() error {
 // until it gets to a non-pointer.
 // if it encounters an (Text)Unmarshaler, indirect stops and returns that.
 func (d *Decoder) indirect(v reflect.Value) (Unmarshaler, encoding.TextUnmarshaler, reflect.Value) {
-	// If v is a named type and is addressable,
-	// start with its address, so that if the type has pointer methods,
-	// we find them.
+	v = d.prepareAddressableValue(v)
+	return d.navigateValueChain(v)
+}
+
+// prepareAddressableValue ensures that named types are addressable for pointer method access.
+// If the value is a named type and can be addressed, it returns the address of the value.
+func (d *Decoder) prepareAddressableValue(v reflect.Value) reflect.Value {
 	if v.Kind() != reflect.Ptr && v.Type().Name() != "" && v.CanAddr() {
 		v = v.Addr()
 	}
-	for {
-		// Load value from interface, but only if the result will be
-		// usefully addressable.
-		if v.Kind() == reflect.Interface && !v.IsNil() {
-			e := v.Elem()
-			if e.Kind() == reflect.Ptr && !e.IsNil() {
-				v = e
-				continue
-			}
-		}
+	return v
+}
 
+// navigateValueChain walks through the pointer and interface chain, checking for unmarshalers.
+// It returns any unmarshaler interfaces found or the final concrete value.
+func (d *Decoder) navigateValueChain(v reflect.Value) (Unmarshaler, encoding.TextUnmarshaler, reflect.Value) {
+	for {
+		v = d.dereferenceInterface(v)
+		
 		if v.Kind() != reflect.Ptr || v.IsNil() {
 			break
 		}
 
-		vi := v.Interface()
-		if u, ok := vi.(Unmarshaler); ok {
-			return u, nil, reflect.Value{}
-		}
-		if u, ok := vi.(encoding.TextUnmarshaler); ok {
-			return nil, u, reflect.Value{}
+		if unmarshaler, textUnmarshaler := d.checkUnmarshalers(v); unmarshaler != nil || textUnmarshaler != nil {
+			return unmarshaler, textUnmarshaler, reflect.Value{}
 		}
 
 		v = v.Elem()
 	}
 	return nil, nil, indirect(v, true)
+}
+
+// dereferenceInterface handles interface type unwrapping when the result will be usefully addressable.
+// It returns the dereferenced value if it's a non-nil pointer interface, otherwise returns the original value.
+func (d *Decoder) dereferenceInterface(v reflect.Value) reflect.Value {
+	if v.Kind() == reflect.Interface && !v.IsNil() {
+		e := v.Elem()
+		if e.Kind() == reflect.Ptr && !e.IsNil() {
+			return e
+		}
+	}
+	return v
+}
+
+// checkUnmarshalers examines the value's interface to detect Unmarshaler or TextUnmarshaler implementations.
+// It returns the appropriate unmarshaler if found, or nil values if none are detected.
+func (d *Decoder) checkUnmarshalers(v reflect.Value) (Unmarshaler, encoding.TextUnmarshaler) {
+	vi := v.Interface()
+	if u, ok := vi.(Unmarshaler); ok {
+		return u, nil
+	}
+	if u, ok := vi.(encoding.TextUnmarshaler); ok {
+		return nil, u
+	}
+	return nil, nil
 }
 
 func setStructValues(m map[string]reflect.Value, v reflect.Value) {
