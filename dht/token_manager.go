@@ -46,7 +46,7 @@ func (tm *tokenManager) updateToken() {
 }
 
 func (tm *tokenManager) clear(now time.Time, expired time.Duration) {
-	tm.addrs.Range(func(k interface{}, v interface{}) bool {
+	tm.addrs.Range(func(k, v interface{}) bool {
 		if now.Sub(v.(time.Time)) >= expired {
 			tm.addrs.Delete(k)
 		}

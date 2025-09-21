@@ -238,7 +238,7 @@ func (d *TorrentDownloader) processMetadataExchange(conn *pp.PeerConn, host stri
 }
 
 // runMetadataExchangeLoop executes the main message processing loop for metadata exchange.
-func (d *TorrentDownloader) runMetadataExchangeLoop(conn *pp.PeerConn, host string, port uint16, infohash metainfo.Hash, pieces *[][]byte, piecesNum *int, metadataSize *int, utmetadataID *uint8) error {
+func (d *TorrentDownloader) runMetadataExchangeLoop(conn *pp.PeerConn, host string, port uint16, infohash metainfo.Hash, pieces *[][]byte, piecesNum, metadataSize *int, utmetadataID *uint8) error {
 	for {
 		msg, err := d.readNextMessage(conn)
 		if err != nil {
@@ -283,7 +283,7 @@ func (d *TorrentDownloader) checkAndFinalizeMetadata(pieces [][]byte, host strin
 }
 
 // handleMessage processes individual messages during metadata exchange.
-func (d *TorrentDownloader) handleMessage(msg pp.Message, host string, pieces *[][]byte, piecesNum *int, metadataSize *int, utmetadataID *uint8, conn *pp.PeerConn, port uint16, infohash metainfo.Hash) error {
+func (d *TorrentDownloader) handleMessage(msg pp.Message, host string, pieces *[][]byte, piecesNum, metadataSize *int, utmetadataID *uint8, conn *pp.PeerConn, port uint16, infohash metainfo.Hash) error {
 	switch msg.Type {
 	case pp.MTypeExtended:
 		return d.handleExtendedMessage(msg, pieces, piecesNum, metadataSize, utmetadataID, conn)
@@ -298,7 +298,7 @@ func (d *TorrentDownloader) handleMessage(msg pp.Message, host string, pieces *[
 }
 
 // handleExtendedMessage processes extended protocol messages.
-func (d *TorrentDownloader) handleExtendedMessage(msg pp.Message, pieces *[][]byte, piecesNum *int, metadataSize *int, utmetadataID *uint8, conn *pp.PeerConn) error {
+func (d *TorrentDownloader) handleExtendedMessage(msg pp.Message, pieces *[][]byte, piecesNum, metadataSize *int, utmetadataID *uint8, conn *pp.PeerConn) error {
 	switch msg.ExtendedID {
 	case pp.ExtendedIDHandshake:
 		return d.processExtendedHandshake(msg, pieces, piecesNum, metadataSize, utmetadataID, conn)
@@ -310,7 +310,7 @@ func (d *TorrentDownloader) handleExtendedMessage(msg pp.Message, pieces *[][]by
 }
 
 // processExtendedHandshake handles the extended handshake response.
-func (d *TorrentDownloader) processExtendedHandshake(msg pp.Message, pieces *[][]byte, piecesNum *int, metadataSize *int, utmetadataID *uint8, conn *pp.PeerConn) error {
+func (d *TorrentDownloader) processExtendedHandshake(msg pp.Message, pieces *[][]byte, piecesNum, metadataSize *int, utmetadataID *uint8, conn *pp.PeerConn) error {
 	if *utmetadataID > 0 {
 		return fmt.Errorf("rehandshake from the peer '%s'", conn.RemoteAddr().String())
 	}
@@ -337,7 +337,7 @@ func (d *TorrentDownloader) processExtendedHandshake(msg pp.Message, pieces *[][
 }
 
 // processMetadataPiece handles incoming metadata piece data.
-func (d *TorrentDownloader) processMetadataPiece(msg pp.Message, pieces [][]byte, piecesNum int, metadataSize int) error {
+func (d *TorrentDownloader) processMetadataPiece(msg pp.Message, pieces [][]byte, piecesNum, metadataSize int) error {
 	if pieces == nil {
 		return nil
 	}
@@ -360,7 +360,7 @@ func (d *TorrentDownloader) processMetadataPiece(msg pp.Message, pieces [][]byte
 }
 
 // validatePieceData validates the received metadata piece data.
-func (d *TorrentDownloader) validatePieceData(utmsg pp.UtMetadataExtendedMsg, piecesNum int, metadataSize int) error {
+func (d *TorrentDownloader) validatePieceData(utmsg pp.UtMetadataExtendedMsg, piecesNum, metadataSize int) error {
 	pieceLen := len(utmsg.Data)
 	if utmsg.Piece == piecesNum-1 {
 		expectedLen := metadataSize % BlockSize

@@ -50,9 +50,9 @@ type Bep3Handler interface {
 	NotInterested(pc *PeerConn) error
 	Have(pc *PeerConn, index uint32) error
 	BitField(pc *PeerConn, bits BitField) error
-	Request(pc *PeerConn, index uint32, begin uint32, length uint32) error
-	Piece(pc *PeerConn, index uint32, begin uint32, piece []byte) error
-	Cancel(pc *PeerConn, index uint32, begin uint32, length uint32) error
+	Request(pc *PeerConn, index, begin, length uint32) error
+	Piece(pc *PeerConn, index, begin uint32, piece []byte) error
+	Cancel(pc *PeerConn, index, begin, length uint32) error
 }
 
 // Bep5Handler is used to handle the BEP 5 type message if Handler has also
@@ -72,7 +72,7 @@ type Bep6Handler interface {
 	HaveNone(pc *PeerConn) error
 	Suggest(pc *PeerConn, index uint32) error
 	AllowedFast(pc *PeerConn, index uint32) error
-	Reject(pc *PeerConn, index uint32, begin uint32, length uint32) error
+	Reject(pc *PeerConn, index, begin, length uint32) error
 }
 
 // Bep10Handler is used to handle the BEP 10 extended peer message
