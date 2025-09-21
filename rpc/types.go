@@ -312,7 +312,7 @@ type Torrent struct {
 
 	// Pieces information
 	Pieces         string   `json:"pieces"`
-	PiecesComplete []bool   `json:"pieces"`
+	PiecesComplete []bool   `json:"pieces_complete"`
 	Webseeds       []string `json:"webseeds"`
 
 	// Labels and other metadata
@@ -431,6 +431,28 @@ type TorrentState struct {
 	Uploaded   int64 `json:"uploaded"`
 	Left       int64 `json:"left"`
 
+	// Progress and completion statistics
+	PercentDone     float64 `json:"percent_done"`     // Completion percentage (0.0 to 1.0)
+	PieceCount      int64   `json:"piece_count"`      // Total number of pieces
+	PiecesComplete  int64   `json:"pieces_complete"`  // Number of completed pieces
+	PiecesAvailable int64   `json:"pieces_available"` // Number of pieces available from peers
+
+	// Transfer rates and timing
+	DownloadRate int64 `json:"download_rate"` // Bytes per second
+	UploadRate   int64 `json:"upload_rate"`   // Bytes per second
+	ETA          int64 `json:"eta"`           // Estimated time to completion in seconds (-1 if unknown)
+
+	// Peer statistics
+	PeerCount          int64 `json:"peer_count"`           // Number of connected peers
+	PeerConnectedCount int64 `json:"peer_connected_count"` // Number of peers we're connected to
+	PeerSendingCount   int64 `json:"peer_sending_count"`   // Number of peers sending data to us
+	PeerReceivingCount int64 `json:"peer_receiving_count"` // Number of peers receiving data from us
+
+	// Activity tracking for transfer rate calculation
+	lastStatsUpdate time.Time // Internal field for rate calculation
+	lastDownloaded  int64     // Internal field for rate calculation
+	lastUploaded    int64     // Internal field for rate calculation
+
 	// File information
 	Files      []FileInfo `json:"files"`
 	Priorities []int64    `json:"priorities"`
@@ -439,10 +461,6 @@ type TorrentState struct {
 	// Peer and tracker information
 	TrackerList []string   `json:"tracker_list"`
 	Peers       []PeerInfo `json:"peers"`
-
-	// Transfer rates
-	DownloadRate int64 `json:"download_rate"`
-	UploadRate   int64 `json:"upload_rate"`
 
 	// Seeding configuration
 	SeedRatioLimit      float64 `json:"seed_ratio_limit"`

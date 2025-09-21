@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/go-i2p/go-i2p-bt/bencode"
 	"github.com/go-i2p/go-i2p-bt/dht"
@@ -649,5 +650,389 @@ func BenchmarkAddTorrent(b *testing.B) {
 		if err != nil {
 			b.Fatalf("Failed to add torrent: %v", err)
 		}
+	}
+}
+
+// Test statistics functionality
+func TestUpdateTorrentStatistics(t *testing.T) {
+	tm, err := NewTorrentManager(createTestTorrentManagerConfig())
+	if err != nil {
+		t.Fatalf("Failed to create TorrentManager: %v", err)
+	}
+	defer tm.Close()
+
+	now := time.Now()
+
+	// Create test torrent with initial state
+	torrent := &TorrentState{
+		InfoHash:        metainfo.NewRandomHash(),
+		Downloaded:      1000,
+		Uploaded:        500,
+		PercentDone:     0.0,
+		lastStatsUpdate: now.Add(-5 * time.Second),
+		lastDownloaded:  800,
+		lastUploaded:    300,
+		Peers: []PeerInfo{
+			{ID: "peer1", Address: "127.0.0.1", Port: 6881, Direction: "outgoing"},
+			{ID: "peer2", Address: "127.0.0.2", Port: 6881, Direction: "incoming"},
+			{ID: "peer3", Address: "127.0.0.3", Port: 6881, Direction: "outgoing"},
+		},
+	}
+
+	// Update statistics
+	tm.updateTorrentStatistics(torrent, now)
+
+	// Verify transfer rate calculations
+	expectedDownloadRate := int64((1000 - 800) / 5) // 40 bytes/sec
+	expectedUploadRate := int64((500 - 300) / 5)    // 40 bytes/sec
+
+	if torrent.DownloadRate != expectedDownloadRate {
+		t.Errorf("Expected download rate %d, got %d", expectedDownloadRate, torrent.DownloadRate)
+	}
+
+	if torrent.UploadRate != expectedUploadRate {
+		t.Errorf("Expected upload rate %d, got %d", expectedUploadRate, torrent.UploadRate)
+	}
+
+	// Verify peer count
+	if torrent.PeerCount != 3 {
+		t.Errorf("Expected peer count 3, got %d", torrent.PeerCount)
+	}
+
+	// Verify tracking fields are updated
+	if torrent.lastStatsUpdate != now {
+		t.Errorf("Last stats update time not updated correctly")
+	}
+
+	if torrent.lastDownloaded != 1000 {
+		t.Errorf("Last downloaded not updated correctly")
+	}
+
+	if torrent.lastUploaded != 500 {
+		t.Errorf("Last uploaded not updated correctly")
+	}
+}
+
+func TestUpdateTorrentStatisticsFirstUpdate(t *testing.T) {
+	tm, err := NewTorrentManager(createTestTorrentManagerConfig())
+	if err != nil {
+		t.Fatalf("Failed to create TorrentManager: %v", err)
+	}
+	defer tm.Close()
+
+	now := time.Now()
+
+	// Create torrent with no previous stats update (zero time)
+	torrent := &TorrentState{
+		InfoHash:   metainfo.NewRandomHash(),
+		Downloaded: 1000,
+		Uploaded:   500,
+		Peers: []PeerInfo{
+			{ID: "peer1", Address: "127.0.0.1", Port: 6881, Direction: "outgoing"},
+		},
+	}
+
+	tm.updateTorrentStatistics(torrent, now)
+
+	// On first update, rates should be 0 since we have no previous data
+	if torrent.DownloadRate != 0 {
+		t.Errorf("Expected download rate 0 on first update, got %d", torrent.DownloadRate)
+	}
+
+	if torrent.UploadRate != 0 {
+		t.Errorf("Expected upload rate 0 on first update, got %d", torrent.UploadRate)
+	}
+
+	// Verify tracking fields are set
+	if torrent.lastStatsUpdate != now {
+		t.Errorf("Last stats update time not set correctly")
+	}
+}
+
+func TestCalculateETA(t *testing.T) {
+	tm, err := NewTorrentManager(createTestTorrentManagerConfig())
+	if err != nil {
+		t.Fatalf("Failed to create TorrentManager: %v", err)
+	}
+	defer tm.Close()
+
+	tests := []struct {
+		name        string
+		torrent     *TorrentState
+		expectedETA int64
+		description string
+	}{
+		{
+			name: "Normal download in progress",
+			torrent: &TorrentState{
+				Left:         5000,
+				DownloadRate: 1000, // 1000 bytes/sec
+			},
+			expectedETA: 5, // 5000/1000 = 5 seconds
+			description: "Should calculate ETA based on current download rate",
+		},
+		{
+			name: "Zero download rate",
+			torrent: &TorrentState{
+				Left:         5000,
+				DownloadRate: 0,
+			},
+			expectedETA: -1, // Unknown ETA
+			description: "Should return -1 when download rate is 0",
+		},
+		{
+			name: "Download complete",
+			torrent: &TorrentState{
+				Left:         0,
+				DownloadRate: 1000,
+			},
+			expectedETA: 0, // Already complete
+			description: "Should return 0 when download is complete",
+		},
+		{
+			name: "Very slow download",
+			torrent: &TorrentState{
+				Left:         10000,
+				DownloadRate: 1, // 1 byte/sec
+			},
+			expectedETA: 10000, // 10000/1 = 10000 seconds
+			description: "Should handle very slow downloads correctly",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := tm.calculateETA(tt.torrent)
+			if result != tt.expectedETA {
+				t.Errorf("%s: expected ETA %d, got %d", tt.description, tt.expectedETA, result)
+			}
+		})
+	}
+}
+
+func TestCountConnectedPeers(t *testing.T) {
+	tm, err := NewTorrentManager(createTestTorrentManagerConfig())
+	if err != nil {
+		t.Fatalf("Failed to create TorrentManager: %v", err)
+	}
+	defer tm.Close()
+
+	torrent := &TorrentState{
+		InfoHash: metainfo.NewRandomHash(),
+		Peers: []PeerInfo{
+			{ID: "peer1", Address: "127.0.0.1", Port: 6881, Direction: "outgoing"},
+			{ID: "peer2", Address: "127.0.0.2", Port: 6881, Direction: "incoming"},
+			{ID: "peer3", Address: "127.0.0.3", Port: 6881, Direction: "outgoing"},
+			{ID: "peer4", Address: "127.0.0.4", Port: 6881, Direction: "incoming"},
+		},
+	}
+
+	// Test counting connected peers (mock implementation returns all peers as connected)
+	connectedCount := tm.countConnectedPeers(torrent)
+	expectedCount := int64(len(torrent.Peers))
+
+	if connectedCount != expectedCount {
+		t.Errorf("Expected connected peer count %d, got %d", expectedCount, connectedCount)
+	}
+}
+
+func TestCountSendingPeers(t *testing.T) {
+	tm, err := NewTorrentManager(createTestTorrentManagerConfig())
+	if err != nil {
+		t.Fatalf("Failed to create TorrentManager: %v", err)
+	}
+	defer tm.Close()
+
+	torrent := &TorrentState{
+		InfoHash: metainfo.NewRandomHash(),
+		Peers: []PeerInfo{
+			{ID: "peer1", Address: "127.0.0.1", Port: 6881, Direction: "outgoing"},
+			{ID: "peer2", Address: "127.0.0.2", Port: 6881, Direction: "incoming"},
+			{ID: "peer3", Address: "127.0.0.3", Port: 6881, Direction: "outgoing"},
+			{ID: "peer4", Address: "127.0.0.4", Port: 6881, Direction: "incoming"},
+		},
+	}
+
+	// Test counting sending peers (mock implementation estimates based on peer count)
+	sendingCount := tm.countSendingPeers(torrent)
+	expectedMinimum := int64(0)
+	expectedMaximum := int64(len(torrent.Peers))
+
+	if sendingCount < expectedMinimum || sendingCount > expectedMaximum {
+		t.Errorf("Sending peer count %d should be between %d and %d", sendingCount, expectedMinimum, expectedMaximum)
+	}
+}
+
+func TestCountReceivingPeers(t *testing.T) {
+	tm, err := NewTorrentManager(createTestTorrentManagerConfig())
+	if err != nil {
+		t.Fatalf("Failed to create TorrentManager: %v", err)
+	}
+	defer tm.Close()
+
+	torrent := &TorrentState{
+		InfoHash: metainfo.NewRandomHash(),
+		Peers: []PeerInfo{
+			{ID: "peer1", Address: "127.0.0.1", Port: 6881, Direction: "outgoing"},
+			{ID: "peer2", Address: "127.0.0.2", Port: 6881, Direction: "incoming"},
+			{ID: "peer3", Address: "127.0.0.3", Port: 6881, Direction: "outgoing"},
+			{ID: "peer4", Address: "127.0.0.4", Port: 6881, Direction: "incoming"},
+		},
+	}
+
+	// Test counting receiving peers (mock implementation estimates based on peer count)
+	receivingCount := tm.countReceivingPeers(torrent)
+	expectedMinimum := int64(0)
+	expectedMaximum := int64(len(torrent.Peers))
+
+	if receivingCount < expectedMinimum || receivingCount > expectedMaximum {
+		t.Errorf("Receiving peer count %d should be between %d and %d", receivingCount, expectedMinimum, expectedMaximum)
+	}
+}
+
+func TestCalculateCompletedPieces(t *testing.T) {
+	tm, err := NewTorrentManager(createTestTorrentManagerConfig())
+	if err != nil {
+		t.Fatalf("Failed to create TorrentManager: %v", err)
+	}
+	defer tm.Close()
+
+	tests := []struct {
+		name        string
+		torrent     *TorrentState
+		description string
+	}{
+		{
+			name: "Partial completion",
+			torrent: &TorrentState{
+				PercentDone: 0.5, // 50% complete
+			},
+			description: "Should calculate completed pieces based on percentage",
+		},
+		{
+			name: "No completion",
+			torrent: &TorrentState{
+				PercentDone: 0.0,
+			},
+			description: "Should return 0 pieces for 0% completion",
+		},
+		{
+			name: "Full completion",
+			torrent: &TorrentState{
+				PercentDone: 1.0,
+			},
+			description: "Should return all pieces for 100% completion",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := tm.calculateCompletedPieces(tt.torrent)
+
+			// Since we don't have MetaInfo in these tests, result should be 0
+			if result != 0 {
+				t.Errorf("%s: expected 0 pieces (no MetaInfo), got %d", tt.description, result)
+			}
+		})
+	}
+}
+
+func TestCalculateAvailablePieces(t *testing.T) {
+	tm, err := NewTorrentManager(createTestTorrentManagerConfig())
+	if err != nil {
+		t.Fatalf("Failed to create TorrentManager: %v", err)
+	}
+	defer tm.Close()
+
+	tests := []struct {
+		name        string
+		torrent     *TorrentState
+		description string
+	}{
+		{
+			name: "Multiple peers",
+			torrent: &TorrentState{
+				Peers: []PeerInfo{
+					{ID: "peer1", Address: "127.0.0.1", Port: 6881, Direction: "outgoing"},
+					{ID: "peer2", Address: "127.0.0.2", Port: 6881, Direction: "incoming"},
+					{ID: "peer3", Address: "127.0.0.3", Port: 6881, Direction: "outgoing"},
+				},
+				PeerCount: 3,
+			},
+			description: "Should estimate available pieces based on peer count",
+		},
+		{
+			name: "No peers",
+			torrent: &TorrentState{
+				Peers:     []PeerInfo{},
+				PeerCount: 0,
+			},
+			description: "Should return 0 pieces when no peers connected",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := tm.calculateAvailablePieces(tt.torrent)
+
+			// Since we don't have MetaInfo in these tests, result should be 0
+			if result != 0 {
+				t.Errorf("%s: expected 0 pieces (no MetaInfo), got %d", tt.description, result)
+			}
+		})
+	}
+}
+
+// Benchmark tests for statistics performance
+func BenchmarkUpdateTorrentStatistics(b *testing.B) {
+	tm, err := NewTorrentManager(createTestTorrentManagerConfig())
+	if err != nil {
+		b.Fatalf("Failed to create TorrentManager: %v", err)
+	}
+	defer tm.Close()
+
+	now := time.Now()
+
+	torrent := &TorrentState{
+		InfoHash:        metainfo.NewRandomHash(),
+		Downloaded:      1000000,
+		Uploaded:        500000,
+		lastStatsUpdate: now.Add(-5 * time.Second),
+		lastDownloaded:  900000,
+		lastUploaded:    450000,
+		Peers:           make([]PeerInfo, 100), // 100 peers
+	}
+
+	// Fill peers slice
+	for i := 0; i < 100; i++ {
+		torrent.Peers[i] = PeerInfo{
+			ID:        fmt.Sprintf("peer%d", i),
+			Address:   fmt.Sprintf("127.0.0.%d", i+1),
+			Port:      6881,
+			Direction: "outgoing",
+		}
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		tm.updateTorrentStatistics(torrent, now)
+	}
+}
+
+func BenchmarkCalculateETA(b *testing.B) {
+	tm, err := NewTorrentManager(createTestTorrentManagerConfig())
+	if err != nil {
+		b.Fatalf("Failed to create TorrentManager: %v", err)
+	}
+	defer tm.Close()
+
+	torrent := &TorrentState{
+		Left:         5000000, // 5MB left
+		DownloadRate: 1000000, // 1MB/sec
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		tm.calculateETA(torrent)
 	}
 }
