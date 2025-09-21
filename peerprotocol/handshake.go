@@ -99,23 +99,14 @@ func NewHandshakeMsg(peerID, infoHash metainfo.Hash, es ...ExtensionBits) Handsh
 func Handshake(sock io.ReadWriter, msg HandshakeMsg) (ret HandshakeMsg, err error) {
 	var read bool
 	if msg.InfoHash.IsZero() {
-		if err = getPeerHandshakeMsg(sock, &ret); err != nil {
+		if ret, err = readInitialPeerHandshake(sock); err != nil {
 			return
 		}
 		read = true
 		msg.InfoHash = ret.InfoHash
 	}
 
-	if _, err = io.WriteString(sock, ProtocolHeader); err != nil {
-		return
-	}
-	if _, err = sock.Write(msg.ExtensionBits[:]); err != nil {
-		return
-	}
-	if _, err = sock.Write(msg.InfoHash[:]); err != nil {
-		return
-	}
-	if _, err = sock.Write(msg.PeerID[:]); err != nil {
+	if err = writeHandshakeMessage(sock, msg); err != nil {
 		return
 	}
 
@@ -123,6 +114,30 @@ func Handshake(sock io.ReadWriter, msg HandshakeMsg) (ret HandshakeMsg, err erro
 		err = getPeerHandshakeMsg(sock, &ret)
 	}
 	return
+}
+
+// readInitialPeerHandshake reads the peer's handshake message when InfoHash is zero.
+func readInitialPeerHandshake(sock io.Reader) (HandshakeMsg, error) {
+	var msg HandshakeMsg
+	err := getPeerHandshakeMsg(sock, &msg)
+	return msg, err
+}
+
+// writeHandshakeMessage writes the complete handshake message sequence to the peer.
+func writeHandshakeMessage(sock io.Writer, msg HandshakeMsg) error {
+	if _, err := io.WriteString(sock, ProtocolHeader); err != nil {
+		return err
+	}
+	if _, err := sock.Write(msg.ExtensionBits[:]); err != nil {
+		return err
+	}
+	if _, err := sock.Write(msg.InfoHash[:]); err != nil {
+		return err
+	}
+	if _, err := sock.Write(msg.PeerID[:]); err != nil {
+		return err
+	}
+	return nil
 }
 
 func getPeerHandshakeMsg(sock io.Reader, ret *HandshakeMsg) (err error) {
