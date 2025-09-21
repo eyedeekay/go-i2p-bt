@@ -142,7 +142,11 @@ func (h *Hash) FromString(s string) (err error) {
 	case 32:
 		var bs []byte
 		if bs, err = base32.StdEncoding.DecodeString(s); err == nil {
-			copy(h[:], bs)
+			if len(bs) != HashSize {
+				err = fmt.Errorf("base32 decoded hash has wrong length: %d, expected %d", len(bs), HashSize)
+			} else {
+				copy(h[:], bs)
+			}
 		}
 	default:
 		err = fmt.Errorf("hash string has bad length: %d", len(s))

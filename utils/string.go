@@ -19,6 +19,8 @@ import "crypto/rand"
 // RandomString generates a size-length string randomly.
 func RandomString(size int) string {
 	bs := make([]byte, size)
-	rand.Read(bs)
+	if _, err := rand.Read(bs); err != nil {
+		panic("crypto/rand.Read failed: " + err.Error())
+	}
 	return string(bs)
 }
