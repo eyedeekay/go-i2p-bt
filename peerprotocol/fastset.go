@@ -39,10 +39,9 @@ func GenerateAllowedFastSet(set []uint32, sz uint32, ip net.IP, infohash metainf
 
 	iplen := len(ip)
 	x := make([]byte, 20+iplen)
-	for i, j := 0, iplen-1; i < j; i++ { // (1) compatible with IPv4/IPv6
+	for i := 0; i < iplen; i++ { // (1) compatible with IPv4/IPv6 - process all IP bytes per BEP 6
 		x[i] = ip[i] & 0xff //              (1)
 	}
-	// x[iplen-1] = 0 // It is equal to 0 primitively.
 	copy(x[iplen:], infohash[:]) // (2)
 
 	for cur, k := 0, len(set); cur < k; {
