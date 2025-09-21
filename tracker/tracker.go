@@ -215,7 +215,7 @@ type ClientConfig struct {
 // NewClient returns a new Client.
 func NewClient(connURL string, conf ...ClientConfig) (c Client, err error) {
 	config := extractConfig(conf)
-	
+
 	u, err := url.Parse(connURL)
 	if err != nil {
 		return nil, err
@@ -262,7 +262,7 @@ func createUDPClient(connURL string, u *url.URL, config ClientConfig) (Client, e
 	if p := u.RequestURI(); p != "" {
 		exts = []udptracker.Extension{udptracker.NewURLData([]byte(p))}
 	}
-	
+
 	return &tclient{url: connURL, exts: exts, udp: utc}, nil
 }
 
