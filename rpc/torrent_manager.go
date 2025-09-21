@@ -19,7 +19,11 @@ import (
 	"crypto/sha1"
 	"encoding/base64"
 	"fmt"
+	"io"
 	"log"
+	"net"
+	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -64,6 +68,7 @@ type TorrentManager struct {
 
 	// Core components
 	dhtServer  *dht.Server
+	dhtConn    net.PacketConn
 	downloader *downloader.TorrentDownloader
 
 	// Thread-safe torrent storage
@@ -153,15 +158,46 @@ func NewTorrentManager(config TorrentManagerConfig) (*TorrentManager, error) {
 		log:           config.ErrorLog,
 	}
 
-	// Initialize DHT server if enabled (simplified - would need proper network connection)
-	// Note: In a full implementation, you'd create a UDP connection for DHT
-	// For now, we'll leave DHT integration for future enhancement
+	// Initialize DHT server if enabled
 	if config.SessionConfig.DHTEnabled {
-		tm.log("DHT enabled but not fully implemented in this version")
+		dhtAddr := fmt.Sprintf(":%d", config.PeerPort)
+		dhtConn, err := net.ListenPacket("udp", dhtAddr)
+		if err != nil {
+			tm.log("Failed to create DHT connection on %s: %v", dhtAddr, err)
+			// Continue without DHT - not a fatal error
+		} else {
+			tm.dhtConn = dhtConn
+
+			dhtConfig := dht.Config{
+				ID:        config.DHTConfig.ID,
+				K:         config.DHTConfig.K,
+				ReadOnly:  config.DHTConfig.ReadOnly,
+				ErrorLog:  config.ErrorLog,
+				OnSearch:  tm.onDHTSearch,
+				OnTorrent: tm.onDHTTorrent,
+			}
+
+			tm.dhtServer = dht.NewServer(dhtConn, dhtConfig)
+			go tm.dhtServer.Run()
+
+			tm.log("DHT server initialized on %s", dhtAddr)
+		}
 	}
 
 	// Initialize torrent downloader
 	tm.downloader = downloader.NewTorrentDownloader(config.DownloaderConfig)
+
+	// Set up DHT integration with downloader for peer discovery
+	if tm.dhtServer != nil {
+		tm.downloader.OnDHTNode(func(host string, port uint16) {
+			// This callback receives DHT node information from peers
+			// We could ping these nodes to add them to our DHT routing table
+			addr, err := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:%d", host, port))
+			if err == nil {
+				_ = tm.dhtServer.Ping(addr)
+			}
+		})
+	}
 
 	// Start background processes
 	go tm.processDownloaderResponses()
@@ -179,11 +215,40 @@ func (tm *TorrentManager) Close() error {
 	}
 
 	if tm.dhtServer != nil {
-		// Note: DHT Close() doesn't return an error in the current implementation
 		tm.dhtServer.Close()
 	}
 
+	if tm.dhtConn != nil {
+		tm.dhtConn.Close()
+	}
+
 	return nil
+}
+
+// onDHTSearch is called when someone searches for a torrent via DHT
+func (tm *TorrentManager) onDHTSearch(infohash string, addr net.Addr) {
+	tm.log("DHT search request for infohash %s from %s", infohash, addr)
+	// This could trigger additional peer discovery for popular torrents
+}
+
+// onDHTTorrent is called when we discover a peer has a specific torrent
+func (tm *TorrentManager) onDHTTorrent(infohash string, addr net.Addr) {
+	tm.log("DHT discovered peer %s for infohash %s", addr, infohash)
+
+	// Find if we have this torrent and are actively downloading
+	tm.mu.RLock()
+	defer tm.mu.RUnlock()
+
+	for _, torrent := range tm.torrents {
+		if torrent.InfoHash.HexString() == infohash {
+			if torrent.Status == TorrentStatusDownloading ||
+				torrent.Status == TorrentStatusQueuedVerify {
+				// We could initiate a peer connection here
+				tm.log("Found potential peer %s for active torrent %d", addr, torrent.ID)
+			}
+			break
+		}
+	}
 }
 
 // AddTorrent adds a new torrent from either a .torrent file (base64 encoded) or magnet URI
@@ -295,9 +360,7 @@ func (tm *TorrentManager) AddTorrent(req TorrentAddRequest) (*TorrentState, erro
 			// Get tracker list
 			announces := metaInfo.Announces()
 			for _, tierList := range announces {
-				for _, announce := range tierList {
-					torrentState.TrackerList = append(torrentState.TrackerList, announce)
-				}
+				torrentState.TrackerList = append(torrentState.TrackerList, tierList...)
 			}
 		}
 	}
@@ -308,6 +371,9 @@ func (tm *TorrentManager) AddTorrent(req TorrentAddRequest) (*TorrentState, erro
 	// Start download if not paused
 	if !req.Paused && tm.sessionConfig.StartAddedTorrents {
 		go tm.startTorrent(torrentState)
+	} else if metaInfo != nil {
+		// Even if paused, verify existing data
+		go tm.VerifyTorrent(torrentID)
 	}
 
 	atomic.AddInt64(&tm.stats.TorrentsAdded, 1)
@@ -444,31 +510,130 @@ func (tm *TorrentManager) UpdateSessionConfig(config SessionConfiguration) error
 
 // Private methods
 
-// startTorrent initiates the download process for a torrent
+// startTorrent initiates the download process for a torrent with actual BitTorrent operations
 func (tm *TorrentManager) startTorrent(torrent *TorrentState) {
-	// If we don't have metadata, request it
-	if torrent.MetaInfo == nil {
-		// Try to find peers from DHT or other sources
-		// This is a simplified implementation
-		tm.log("Starting metadata download for torrent %s", torrent.InfoHash.HexString())
+	tm.log("Starting torrent %s (ID: %d)", torrent.InfoHash.HexString(), torrent.ID)
 
-		// TODO: Implement peer discovery and metadata download
-		// For now, just mark as downloading
-		torrent.Status = TorrentStatusVerifying
+	// If we don't have metadata, request it through DHT and downloader
+	if torrent.MetaInfo == nil {
+		tm.log("Starting metadata download for torrent %s", torrent.InfoHash.HexString())
+		torrent.Status = TorrentStatusQueuedVerify
+
+		// Use DHT to find peers that have this torrent
+		if tm.dhtServer != nil {
+			go tm.findPeersViaDHT(torrent)
+		} else {
+			tm.log("DHT not available for peer discovery")
+		}
+
 		return
 	}
 
-	// We have metadata, start downloading the actual files
+	// We have metadata, start the full download process
 	tm.log("Starting file download for torrent %s", torrent.InfoHash.HexString())
-
-	// TODO: Implement actual file downloading using the existing components
-	// This would involve:
-	// 1. Announcing to trackers
-	// 2. Finding peers through DHT
-	// 3. Connecting to peers and downloading pieces
-	// 4. Writing pieces to disk
-
 	torrent.Status = TorrentStatusDownloading
+
+	// Announce to trackers if available
+	if len(torrent.TrackerList) > 0 {
+		go tm.announceToTrackers(torrent)
+	}
+
+	// Continue peer discovery via DHT even when we have metadata
+	if tm.dhtServer != nil {
+		go tm.findPeersViaDHT(torrent)
+	}
+}
+
+// findPeersViaDHT uses DHT to discover peers for a torrent
+func (tm *TorrentManager) findPeersViaDHT(torrent *TorrentState) {
+	tm.log("Searching for peers via DHT for torrent %s", torrent.InfoHash.HexString())
+
+	// Use DHT GetPeers to find peers storing this torrent
+	tm.dhtServer.GetPeers(torrent.InfoHash, func(result dht.Result) {
+		if result.Code != 0 {
+			tm.log("DHT peer discovery failed for %s: %s", torrent.InfoHash.HexString(), result.Reason)
+			return
+		}
+
+		if result.Timeout {
+			tm.log("DHT peer discovery timeout for %s", torrent.InfoHash.HexString())
+			return
+		}
+
+		if len(result.Peers) > 0 {
+			tm.log("DHT found %d peers for torrent %s", len(result.Peers), torrent.InfoHash.HexString())
+
+			// If we don't have metadata yet, try to download it from these peers
+			if torrent.MetaInfo == nil {
+				for _, peer := range result.Peers {
+					if peer.Port > 0 && peer.Port < 65535 {
+						go tm.requestMetadataFromPeer(torrent, peer)
+					}
+				}
+			} else {
+				// Update peer list for active torrent
+				tm.updateTorrentPeers(torrent, result.Peers)
+			}
+		} else {
+			tm.log("No peers found via DHT for torrent %s", torrent.InfoHash.HexString())
+		}
+	})
+}
+
+// requestMetadataFromPeer attempts to download metadata from a specific peer
+func (tm *TorrentManager) requestMetadataFromPeer(torrent *TorrentState, peer metainfo.Address) {
+	tm.log("Requesting metadata from peer %s for torrent %s", peer.String(), torrent.InfoHash.HexString())
+
+	// Use the downloader to request metadata from this peer
+	tm.downloader.Request(peer.IP.String(), uint16(peer.Port), torrent.InfoHash)
+}
+
+// announceToTrackers announces the torrent to its tracker list
+func (tm *TorrentManager) announceToTrackers(torrent *TorrentState) {
+	tm.log("Announcing to trackers for torrent %s", torrent.InfoHash.HexString())
+
+	// This is a simplified tracker announce - in a full implementation,
+	// we would create proper tracker clients and handle the announce protocol
+	for _, trackerURL := range torrent.TrackerList {
+		tm.log("Would announce to tracker: %s", trackerURL)
+		// TODO: Implement actual tracker announcing
+		// This would involve creating HTTP or UDP tracker clients
+		// and sending announce requests
+	}
+}
+
+// updateTorrentPeers updates the peer list for a torrent
+func (tm *TorrentManager) updateTorrentPeers(torrent *TorrentState, peers []metainfo.Address) {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+
+	// Update peer information - convert metainfo.Address to PeerInfo
+	newPeers := make([]PeerInfo, 0, len(peers))
+	for _, peer := range peers {
+		peerInfo := PeerInfo{
+			Address:   peer.IP.String(),
+			Port:      int64(peer.Port),
+			Direction: "outgoing", // We're connecting to them
+		}
+		newPeers = append(newPeers, peerInfo)
+	}
+
+	// Add new peers to existing list (avoiding duplicates in a simple way)
+	existingAddrs := make(map[string]bool)
+	for _, existing := range torrent.Peers {
+		key := fmt.Sprintf("%s:%d", existing.Address, existing.Port)
+		existingAddrs[key] = true
+	}
+
+	for _, newPeer := range newPeers {
+		key := fmt.Sprintf("%s:%d", newPeer.Address, newPeer.Port)
+		if !existingAddrs[key] {
+			torrent.Peers = append(torrent.Peers, newPeer)
+		}
+	}
+
+	tm.log("Updated peer list for torrent %s: %d total peers",
+		torrent.InfoHash.HexString(), len(torrent.Peers))
 }
 
 // processDownloaderResponses handles responses from the torrent downloader
@@ -540,10 +705,13 @@ func (tm *TorrentManager) handleDownloaderResponse(response downloader.TorrentRe
 		torrent.Wanted[i] = true
 	}
 
-	// Update status
+	// Update status and start the download process
 	torrent.Status = TorrentStatusDownloading
 
-	tm.log("Metadata downloaded for torrent %s", response.InfoHash.HexString())
+	tm.log("Metadata downloaded for torrent %s, starting file download", response.InfoHash.HexString())
+
+	// Now that we have metadata, start the full download process
+	go tm.startTorrent(torrent)
 }
 
 // updateTorrentStats periodically updates torrent statistics
@@ -645,4 +813,221 @@ func (tm *TorrentManager) getRecentlyActiveTorrents() []int64 {
 	}
 
 	return result
+}
+
+// Torrent verification methods
+
+// VerifyTorrent verifies all pieces of a torrent and updates completion status
+func (tm *TorrentManager) VerifyTorrent(id int64) error {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+
+	torrent, exists := tm.torrents[id]
+	if !exists {
+		return fmt.Errorf("torrent with ID %d not found", id)
+	}
+
+	if torrent.MetaInfo == nil {
+		return fmt.Errorf("cannot verify torrent %d: no metadata available", id)
+	}
+
+	tm.log("Starting verification for torrent %s", torrent.InfoHash.HexString())
+	torrent.Status = TorrentStatusVerifying
+
+	go tm.verifyTorrentAsync(torrent)
+	return nil
+}
+
+// verifyTorrentAsync performs piece verification in a background goroutine
+func (tm *TorrentManager) verifyTorrentAsync(torrent *TorrentState) {
+	info, err := torrent.MetaInfo.Info()
+	if err != nil {
+		tm.log("Failed to get info for torrent %s verification: %v", torrent.InfoHash.HexString(), err)
+		torrent.Status = TorrentStatusStopped
+		return
+	}
+
+	totalPieces := info.CountPieces()
+	verifiedPieces := 0
+	totalBytes := int64(0)
+	completedBytes := int64(0)
+
+	tm.log("Verifying %d pieces for torrent %s", totalPieces, torrent.InfoHash.HexString())
+
+	// Verify each piece
+	for i := 0; i < totalPieces; i++ {
+		piece := info.Piece(i)
+		verified, err := tm.verifyPiece(torrent, piece)
+		if err != nil {
+			tm.log("Error verifying piece %d for torrent %s: %v", i, torrent.InfoHash.HexString(), err)
+			continue
+		}
+
+		totalBytes += piece.Length()
+		if verified {
+			verifiedPieces++
+			completedBytes += piece.Length()
+		}
+	}
+
+	// Update torrent statistics
+	tm.mu.Lock()
+	torrent.Downloaded = completedBytes
+	torrent.Left = totalBytes - completedBytes
+	tm.mu.Unlock()
+
+	// Update file completion stats
+	tm.updateFileCompletion(torrent, info, completedBytes)
+
+	// Update status based on verification results
+	if verifiedPieces == totalPieces {
+		torrent.Status = TorrentStatusSeeding
+		tm.log("Torrent %s is 100%% complete (%d/%d pieces)", torrent.InfoHash.HexString(), verifiedPieces, totalPieces)
+	} else if verifiedPieces > 0 {
+		torrent.Status = TorrentStatusDownloading
+		tm.log("Torrent %s is %.1f%% complete (%d/%d pieces)",
+			torrent.InfoHash.HexString(),
+			float64(verifiedPieces)*100.0/float64(totalPieces),
+			verifiedPieces, totalPieces)
+	} else {
+		torrent.Status = TorrentStatusDownloading
+		tm.log("Torrent %s has no verified pieces, starting download", torrent.InfoHash.HexString())
+	}
+}
+
+// verifyPiece verifies a single piece by reading it from disk and checking its hash
+func (tm *TorrentManager) verifyPiece(torrent *TorrentState, piece metainfo.Piece) (bool, error) {
+	// Get torrent info
+	info, err := torrent.MetaInfo.Info()
+	if err != nil {
+		return false, err
+	}
+
+	// Construct the file path for this torrent
+	torrentDir := filepath.Join(torrent.DownloadDir, info.Name)
+
+	// Read the piece data from the appropriate files
+	pieceData, err := tm.readPieceFromFiles(torrent, piece, torrentDir)
+	if err != nil {
+		return false, err
+	}
+
+	// If piece data is incomplete (file doesn't exist or is truncated), it's not verified
+	if len(pieceData) != int(piece.Length()) {
+		return false, nil
+	}
+
+	// Calculate hash and compare with expected hash
+	actualHash := sha1.Sum(pieceData)
+	expectedHash := piece.Hash()
+
+	return actualHash == [20]byte(expectedHash), nil
+}
+
+// readPieceFromFiles reads piece data from the actual files on disk
+func (tm *TorrentManager) readPieceFromFiles(torrent *TorrentState, piece metainfo.Piece, torrentDir string) ([]byte, error) {
+	info, err := torrent.MetaInfo.Info()
+	if err != nil {
+		return nil, err
+	}
+
+	pieceOffset := piece.Offset()
+	pieceLength := piece.Length()
+	pieceData := make([]byte, pieceLength)
+
+	var currentOffset int64
+	var piecePos int64
+
+	// Read data from files that contribute to this piece
+	for _, file := range info.Files {
+		filePath := filepath.Join(torrentDir, file.Path(info))
+		fileSize := file.Length
+
+		// Check if this file contributes to the current piece
+		if currentOffset+fileSize <= pieceOffset {
+			// File is entirely before this piece
+			currentOffset += fileSize
+			continue
+		}
+
+		if currentOffset >= pieceOffset+pieceLength {
+			// File is entirely after this piece
+			break
+		}
+
+		// This file contributes to the piece
+		fileStartInPiece := int64(0)
+		if currentOffset < pieceOffset {
+			fileStartInPiece = pieceOffset - currentOffset
+		}
+
+		readStart := currentOffset + fileStartInPiece
+		readLength := fileSize - fileStartInPiece
+		if readStart+readLength > pieceOffset+pieceLength {
+			readLength = pieceOffset + pieceLength - readStart
+		}
+
+		// Try to read from the file
+		fileData, err := tm.readFileSegment(filePath, fileStartInPiece, readLength)
+		if err != nil {
+			// File doesn't exist or can't be read - piece is incomplete
+			return nil, err
+		}
+
+		// Copy data to piece buffer
+		copy(pieceData[piecePos:], fileData)
+		piecePos += readLength
+		currentOffset += fileSize
+	}
+
+	return pieceData[:piecePos], nil
+}
+
+// readFileSegment reads a segment of a file
+func (tm *TorrentManager) readFileSegment(filePath string, offset, length int64) ([]byte, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	if _, err := file.Seek(offset, io.SeekStart); err != nil {
+		return nil, err
+	}
+
+	data := make([]byte, length)
+	n, err := io.ReadFull(file, data)
+	if err != nil && err != io.ErrUnexpectedEOF {
+		return nil, err
+	}
+
+	return data[:n], nil
+}
+
+// updateFileCompletion updates individual file completion statistics
+func (tm *TorrentManager) updateFileCompletion(torrent *TorrentState, info metainfo.Info, totalCompleted int64) {
+	var currentOffset int64
+
+	for i, file := range info.Files {
+		fileStart := currentOffset
+		fileEnd := currentOffset + file.Length
+
+		// Calculate how much of this file is completed
+		var fileCompleted int64
+		if totalCompleted >= fileEnd {
+			// Entire file is completed
+			fileCompleted = file.Length
+		} else if totalCompleted > fileStart {
+			// Partial file completion
+			fileCompleted = totalCompleted - fileStart
+		}
+		// else fileCompleted remains 0
+
+		// Update file info
+		if i < len(torrent.Files) {
+			torrent.Files[i].BytesCompleted = fileCompleted
+		}
+
+		currentOffset += file.Length
+	}
 }

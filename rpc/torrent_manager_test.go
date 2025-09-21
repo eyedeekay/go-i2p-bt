@@ -1,0 +1,653 @@
+package rpc
+
+import (
+	"encoding/base64"
+	"fmt"
+	"io/ioutil"
+	"net"
+	"os"
+	"testing"
+
+	"github.com/go-i2p/go-i2p-bt/bencode"
+	"github.com/go-i2p/go-i2p-bt/dht"
+	"github.com/go-i2p/go-i2p-bt/downloader"
+	"github.com/go-i2p/go-i2p-bt/metainfo"
+)
+
+// Mock logger for testing
+func testLogger(format string, args ...interface{}) {
+	// Silent logger for tests unless debugging
+}
+
+// Create a test TorrentManager configuration
+func createTestTorrentManagerConfig() TorrentManagerConfig {
+	return TorrentManagerConfig{
+		DHTConfig: dht.Config{
+			ID: metainfo.NewRandomHash(),
+			K:  8,
+		},
+		DownloaderConfig: downloader.TorrentDownloaderConfig{
+			ID:        metainfo.NewRandomHash(),
+			WorkerNum: 1, // Use fewer workers for tests
+		},
+		DownloadDir:         "test_downloads",
+		ErrorLog:            testLogger,
+		MaxTorrents:         10,
+		PeerLimitGlobal:     50,
+		PeerLimitPerTorrent: 10,
+		PeerPort:            0, // Use random port for tests
+		SessionConfig: SessionConfiguration{
+			DownloadDir:         "test_downloads",
+			PeerPort:            6881, // Use valid port for tests
+			PeerLimitGlobal:     50,
+			PeerLimitPerTorrent: 10,
+			DHTEnabled:          false, // Disable DHT for most tests
+			PEXEnabled:          true,
+			StartAddedTorrents:  true,
+			Version:             "go-i2p-bt-test/1.0.0",
+		},
+	}
+}
+
+// Test TorrentManager creation and basic operations
+func TestNewTorrentManager(t *testing.T) {
+	config := createTestTorrentManagerConfig()
+
+	tm, err := NewTorrentManager(config)
+	if err != nil {
+		t.Fatalf("Failed to create TorrentManager: %v", err)
+	}
+	defer tm.Close()
+
+	// Test basic configuration
+	if tm.config.MaxTorrents != 10 {
+		t.Errorf("Expected MaxTorrents=10, got %d", tm.config.MaxTorrents)
+	}
+
+	if tm.config.DownloadDir != "test_downloads" {
+		t.Errorf("Expected DownloadDir='test_downloads', got %s", tm.config.DownloadDir)
+	}
+
+	// Test session configuration
+	sessionConfig := tm.GetSessionConfig()
+	if sessionConfig.Version != "go-i2p-bt-test/1.0.0" {
+		t.Errorf("Expected Version='go-i2p-bt-test/1.0.0', got %s", sessionConfig.Version)
+	}
+}
+
+// Test TorrentManager with DHT enabled
+func TestTorrentManagerWithDHT(t *testing.T) {
+	config := createTestTorrentManagerConfig()
+	config.SessionConfig.DHTEnabled = true
+	config.PeerPort = 0 // Use random port
+
+	tm, err := NewTorrentManager(config)
+	if err != nil {
+		t.Fatalf("Failed to create TorrentManager with DHT: %v", err)
+	}
+	defer tm.Close()
+
+	// DHT should be initialized
+	if tm.dhtServer == nil {
+		t.Error("DHT server should be initialized when DHTEnabled=true")
+	}
+
+	if tm.dhtConn == nil {
+		t.Error("DHT connection should be created when DHTEnabled=true")
+	}
+}
+
+// Test adding a torrent with metainfo
+func TestAddTorrentWithMetainfo(t *testing.T) {
+	config := createTestTorrentManagerConfig()
+	tm, err := NewTorrentManager(config)
+	if err != nil {
+		t.Fatalf("Failed to create TorrentManager: %v", err)
+	}
+	defer tm.Close()
+
+	metainfoBytes := createTestMetainfoBytes(t)
+	req := TorrentAddRequest{
+		Metainfo: base64.StdEncoding.EncodeToString(metainfoBytes),
+		Paused:   true,
+	}
+
+	torrent, err := tm.AddTorrent(req)
+	if err != nil {
+		t.Fatalf("Failed to add torrent: %v", err)
+	}
+
+	if torrent.ID <= 0 {
+		t.Error("Torrent ID should be positive")
+	}
+
+	if torrent.Status != TorrentStatusStopped {
+		t.Errorf("Expected status %d, got %d", TorrentStatusStopped, torrent.Status)
+	}
+
+	// Test duplicate addition (should fail)
+	_, err = tm.AddTorrent(req)
+	if err == nil {
+		t.Error("Adding duplicate torrent should fail")
+	}
+
+	// Verify torrent is in manager
+	allTorrents := tm.GetAllTorrents()
+	if len(allTorrents) != 1 {
+		t.Errorf("Expected 1 torrent, got %d", len(allTorrents))
+	}
+
+	// Test getting by ID
+	retrieved, err := tm.GetTorrent(torrent.ID)
+	if err != nil {
+		t.Fatalf("Failed to get torrent by ID: %v", err)
+	}
+	if retrieved.ID != torrent.ID {
+		t.Errorf("Expected ID %d, got %d", torrent.ID, retrieved.ID)
+	}
+}
+
+// Test adding a magnet link
+func TestAddMagnetLink(t *testing.T) {
+	config := createTestTorrentManagerConfig()
+	tm, err := NewTorrentManager(config)
+	if err != nil {
+		t.Fatalf("Failed to create TorrentManager: %v", err)
+	}
+	defer tm.Close()
+
+	// Use a valid 40-character hex hash for the test
+	magnetLink := "magnet:?xt=urn:btih:1234567890abcdef1234567890abcdef12345678"
+	req := TorrentAddRequest{
+		Filename: magnetLink,
+		Paused:   true,
+	}
+
+	torrent, err := tm.AddTorrent(req)
+	if err != nil {
+		t.Fatalf("Failed to add magnet link: %v", err)
+	}
+
+	if torrent == nil {
+		t.Fatal("Torrent should not be nil")
+	}
+
+	if torrent.MetaInfo != nil {
+		t.Error("MetaInfo should be nil for magnet link")
+	}
+}
+
+// Test basic torrent operations (start, stop, remove)
+func TestTorrentOperations(t *testing.T) {
+	config := createTestTorrentManagerConfig()
+	tm, err := NewTorrentManager(config)
+	if err != nil {
+		t.Fatalf("Failed to create TorrentManager: %v", err)
+	}
+	defer tm.Close()
+
+	// Add a torrent
+	metainfoBytes := createTestMetainfoBytes(t)
+	req := TorrentAddRequest{
+		Metainfo: base64.StdEncoding.EncodeToString(metainfoBytes),
+		Paused:   true,
+	}
+
+	torrent, err := tm.AddTorrent(req)
+	if err != nil {
+		t.Fatalf("Failed to add torrent: %v", err)
+	}
+
+	// Test start torrent
+	err = tm.StartTorrent(torrent.ID)
+	if err != nil {
+		t.Fatalf("Failed to start torrent: %v", err)
+	}
+
+	// Test stop torrent
+	err = tm.StopTorrent(torrent.ID)
+	if err != nil {
+		t.Fatalf("Failed to stop torrent: %v", err)
+	}
+
+	// Test remove torrent
+	err = tm.RemoveTorrent(torrent.ID, false)
+	if err != nil {
+		t.Fatalf("Failed to remove torrent: %v", err)
+	}
+
+	// Verify torrent is removed
+	_, err = tm.GetTorrent(torrent.ID)
+	if err == nil {
+		t.Error("Getting removed torrent should fail")
+	}
+
+	// Test operations on non-existent torrent
+	err = tm.StartTorrent(999)
+	if err == nil {
+		t.Error("Starting non-existent torrent should fail")
+	}
+
+	err = tm.StopTorrent(999)
+	if err == nil {
+		t.Error("Stopping non-existent torrent should fail")
+	}
+
+	err = tm.RemoveTorrent(999, false)
+	if err == nil {
+		t.Error("Removing non-existent torrent should fail")
+	}
+}
+
+// Test torrent ID resolution
+func TestResolveTorrentIDs(t *testing.T) {
+	config := createTestTorrentManagerConfig()
+	tm, err := NewTorrentManager(config)
+	if err != nil {
+		t.Fatalf("Failed to create TorrentManager: %v", err)
+	}
+	defer tm.Close()
+
+	// Add some torrents with different names to avoid duplicates
+	for i := 0; i < 3; i++ {
+		metainfoBytes := createTestMetainfoBytesWithName(t, fmt.Sprintf("test_torrent_%d", i))
+		req := TorrentAddRequest{
+			Metainfo: base64.StdEncoding.EncodeToString(metainfoBytes),
+			Paused:   true,
+		}
+		_, err := tm.AddTorrent(req)
+		if err != nil {
+			t.Fatalf("Failed to add torrent %d: %v", i, err)
+		}
+	}
+
+	// Test resolving all IDs (empty slice)
+	allIDs, err := tm.ResolveTorrentIDs([]interface{}{})
+	if err != nil {
+		t.Fatalf("Failed to resolve all torrent IDs: %v", err)
+	}
+
+	if len(allIDs) != 3 {
+		t.Errorf("Expected 3 torrent IDs, got %d", len(allIDs))
+	}
+
+	// Test resolving specific ID
+	specificIDs, err := tm.ResolveTorrentIDs([]interface{}{allIDs[0]})
+	if err != nil {
+		t.Fatalf("Failed to resolve specific torrent ID: %v", err)
+	}
+
+	if len(specificIDs) != 1 {
+		t.Errorf("Expected 1 torrent ID, got %d", len(specificIDs))
+	}
+
+	if specificIDs[0] != allIDs[0] {
+		t.Errorf("Expected ID %d, got %d", allIDs[0], specificIDs[0])
+	}
+
+	// Test resolving non-existent hash
+	_, err = tm.ResolveTorrentIDs([]interface{}{"nonexistent_hash"})
+	if err == nil {
+		t.Error("Resolving non-existent torrent hash should fail")
+	}
+}
+
+// Test session configuration updates
+func TestSessionConfigUpdate(t *testing.T) {
+	config := createTestTorrentManagerConfig()
+	tm, err := NewTorrentManager(config)
+	if err != nil {
+		t.Fatalf("Failed to create TorrentManager: %v", err)
+	}
+	defer tm.Close()
+
+	// Get current config
+	currentConfig := tm.GetSessionConfig()
+
+	// Update configuration
+	newConfig := currentConfig
+	newConfig.PeerLimitGlobal = 100
+	newConfig.PeerLimitPerTorrent = 20
+
+	err = tm.UpdateSessionConfig(newConfig)
+	if err != nil {
+		t.Fatalf("Failed to update session config: %v", err)
+	}
+
+	// Verify update
+	updatedConfig := tm.GetSessionConfig()
+	if updatedConfig.PeerLimitGlobal != 100 {
+		t.Errorf("Expected PeerLimitGlobal=100, got %d", updatedConfig.PeerLimitGlobal)
+	}
+
+	if updatedConfig.PeerLimitPerTorrent != 20 {
+		t.Errorf("Expected PeerLimitPerTorrent=20, got %d", updatedConfig.PeerLimitPerTorrent)
+	}
+
+	// Test invalid configuration
+	invalidConfig := newConfig
+	invalidConfig.PeerPort = 0 // Invalid port
+
+	err = tm.UpdateSessionConfig(invalidConfig)
+	if err == nil {
+		t.Error("Updating with invalid configuration should fail")
+	}
+}
+
+// Test error cases
+func TestErrorCases(t *testing.T) {
+	config := createTestTorrentManagerConfig()
+	tm, err := NewTorrentManager(config)
+	if err != nil {
+		t.Fatalf("Failed to create TorrentManager: %v", err)
+	}
+	defer tm.Close()
+
+	// Test invalid base64 in metainfo
+	req1 := TorrentAddRequest{
+		Metainfo: "invalid_base64!",
+		Paused:   true,
+	}
+	_, err = tm.AddTorrent(req1)
+	if err == nil {
+		t.Error("Adding torrent with invalid base64 should fail")
+	}
+
+	// Test invalid bencode data
+	invalidData := base64.StdEncoding.EncodeToString([]byte("not bencode data"))
+	req2 := TorrentAddRequest{
+		Metainfo: invalidData,
+		Paused:   true,
+	}
+	_, err = tm.AddTorrent(req2)
+	if err == nil {
+		t.Error("Adding torrent with invalid bencode should fail")
+	}
+
+	// Test empty filename and metainfo
+	req3 := TorrentAddRequest{
+		Filename: "",
+		Metainfo: "",
+		Paused:   true,
+	}
+	_, err = tm.AddTorrent(req3)
+	if err == nil {
+		t.Error("Adding torrent with no filename or metainfo should fail")
+	}
+
+	// Test getting torrent by hash with invalid hash
+	_, err = tm.GetTorrentByHash("invalid_hash")
+	if err == nil {
+		t.Error("Getting torrent by invalid hash should fail")
+	}
+
+	// Test operations on non-existent torrent
+	_, err = tm.GetTorrent(999)
+	if err == nil {
+		t.Error("Getting non-existent torrent should fail")
+	}
+}
+
+// Test verification functionality
+func TestTorrentVerification(t *testing.T) {
+	// Create temporary directory for test files
+	tempDir, err := ioutil.TempDir("", "torrent_test")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	config := createTestTorrentManagerConfig()
+	config.DownloadDir = tempDir
+	config.SessionConfig.DownloadDir = tempDir
+
+	tm, err := NewTorrentManager(config)
+	if err != nil {
+		t.Fatalf("Failed to create TorrentManager: %v", err)
+	}
+	defer tm.Close()
+
+	// Add a torrent
+	metainfoBytes := createTestMetainfoBytes(t)
+	req := TorrentAddRequest{
+		Metainfo: base64.StdEncoding.EncodeToString(metainfoBytes),
+		Paused:   true,
+	}
+
+	torrent, err := tm.AddTorrent(req)
+	if err != nil {
+		t.Fatalf("Failed to add torrent: %v", err)
+	}
+
+	// Test verification on torrent without files (should not crash)
+	err = tm.VerifyTorrent(torrent.ID)
+	if err != nil {
+		t.Fatalf("Failed to verify torrent: %v", err)
+	}
+
+	// Test verification on non-existent torrent
+	err = tm.VerifyTorrent(999)
+	if err == nil {
+		t.Error("Should fail to verify non-existent torrent")
+	}
+}
+
+// Test GetTorrentByHash method
+func TestGetTorrentByHash(t *testing.T) {
+	config := createTestTorrentManagerConfig()
+	tm, err := NewTorrentManager(config)
+	if err != nil {
+		t.Fatalf("Failed to create TorrentManager: %v", err)
+	}
+	defer tm.Close()
+
+	// Add a torrent
+	metainfoBytes := createTestMetainfoBytesWithName(t, "hash_test_torrent")
+	req := TorrentAddRequest{
+		Metainfo: base64.StdEncoding.EncodeToString(metainfoBytes),
+		Paused:   true,
+	}
+
+	torrent, err := tm.AddTorrent(req)
+	if err != nil {
+		t.Fatalf("Failed to add torrent: %v", err)
+	}
+
+	// Test GetTorrentByHash
+	retrieved, err := tm.GetTorrentByHash(torrent.InfoHash.HexString())
+	if err != nil {
+		t.Fatalf("Failed to get torrent by hash: %v", err)
+	}
+
+	if retrieved.ID != torrent.ID {
+		t.Errorf("Expected torrent ID %d, got %d", torrent.ID, retrieved.ID)
+	}
+
+	if retrieved.InfoHash.HexString() != torrent.InfoHash.HexString() {
+		t.Errorf("Expected hash %s, got %s", torrent.InfoHash.HexString(), retrieved.InfoHash.HexString())
+	}
+}
+
+// Test concurrent operations
+func TestConcurrentOperations(t *testing.T) {
+	config := createTestTorrentManagerConfig()
+	config.MaxTorrents = 100
+
+	tm, err := NewTorrentManager(config)
+	if err != nil {
+		t.Fatalf("Failed to create TorrentManager: %v", err)
+	}
+	defer tm.Close()
+
+	// Add multiple torrents concurrently with unique names
+	const numTorrents = 10
+	errors := make(chan error, numTorrents)
+
+	for i := 0; i < numTorrents; i++ {
+		go func(id int) {
+			// Create unique torrent for this goroutine
+			metainfoBytes := createTestMetainfoBytesWithName(t, fmt.Sprintf("concurrent_torrent_%d", id))
+			req := TorrentAddRequest{
+				Metainfo: base64.StdEncoding.EncodeToString(metainfoBytes),
+				Paused:   true,
+			}
+			_, err := tm.AddTorrent(req)
+			errors <- err
+		}(i)
+	}
+
+	// Check for errors
+	for i := 0; i < numTorrents; i++ {
+		if err := <-errors; err != nil {
+			t.Errorf("Concurrent add torrent failed: %v", err)
+		}
+	}
+
+	// Verify all torrents were added
+	allTorrents := tm.GetAllTorrents()
+	if len(allTorrents) != numTorrents {
+		t.Errorf("Expected %d torrents, got %d", numTorrents, len(allTorrents))
+	}
+}
+
+// Test DHT callbacks
+func TestDHTCallbacks(t *testing.T) {
+	config := createTestTorrentManagerConfig()
+	config.SessionConfig.DHTEnabled = true
+
+	tm, err := NewTorrentManager(config)
+	if err != nil {
+		t.Fatalf("Failed to create TorrentManager: %v", err)
+	}
+	defer tm.Close()
+
+	// Add a torrent
+	metainfoBytes := createTestMetainfoBytesWithName(t, "dht_callback_test")
+	req := TorrentAddRequest{
+		Metainfo: base64.StdEncoding.EncodeToString(metainfoBytes),
+		Paused:   true,
+	}
+	torrent, err := tm.AddTorrent(req)
+	if err != nil {
+		t.Fatalf("Failed to add torrent: %v", err)
+	}
+
+	// Test DHT callbacks (should not panic)
+	addr, _ := net.ResolveUDPAddr("udp", "127.0.0.1:8080")
+	tm.onDHTSearch(torrent.InfoHash.HexString(), addr)
+	tm.onDHTTorrent(torrent.InfoHash.HexString(), addr)
+
+	// Test with invalid hash (should not panic)
+	tm.onDHTSearch("invalid_hash", addr)
+	tm.onDHTTorrent("invalid_hash", addr)
+}
+
+// Test max torrents limit
+func TestMaxTorrentsLimit(t *testing.T) {
+	config := createTestTorrentManagerConfig()
+	config.MaxTorrents = 2 // Very low limit for testing
+
+	tm, err := NewTorrentManager(config)
+	if err != nil {
+		t.Fatalf("Failed to create TorrentManager: %v", err)
+	}
+	defer tm.Close()
+
+	// Add torrents up to the limit
+	for i := 0; i < 2; i++ {
+		metainfoBytes := createTestMetainfoBytesWithName(t, fmt.Sprintf("limit_test_%d", i))
+		req := TorrentAddRequest{
+			Metainfo: base64.StdEncoding.EncodeToString(metainfoBytes),
+			Paused:   true,
+		}
+		_, err := tm.AddTorrent(req)
+		if err != nil {
+			t.Fatalf("Failed to add torrent %d: %v", i, err)
+		}
+	}
+
+	// Try to add one more (should fail)
+	metainfoBytes := createTestMetainfoBytesWithName(t, "limit_test_overflow")
+	req := TorrentAddRequest{
+		Metainfo: base64.StdEncoding.EncodeToString(metainfoBytes),
+		Paused:   true,
+	}
+	_, err = tm.AddTorrent(req)
+	if err == nil {
+		t.Error("Expected error when exceeding max torrents limit")
+	}
+}
+
+// Helper function to create a test torrent metainfo as raw bytes
+func createTestMetainfoBytes(t *testing.T) []byte {
+	return createTestMetainfoBytesWithName(t, "test_torrent")
+}
+
+// Helper function to create a test torrent metainfo as raw bytes with custom name
+func createTestMetainfoBytesWithName(t *testing.T, name string) []byte {
+	// Create a simple info dictionary
+	info := metainfo.Info{
+		Name:        name,
+		PieceLength: 32768, // 32KB pieces
+		Files: []metainfo.File{
+			{
+				Length: 1024, // 1KB file
+				Paths:  []string{"test_file.txt"},
+			},
+		},
+	}
+
+	// Create dummy piece hashes (normally these would be actual SHA1 hashes)
+	pieceCount := (1024 + info.PieceLength - 1) / info.PieceLength
+	info.Pieces = make(metainfo.Hashes, pieceCount)
+	for i := range info.Pieces {
+		info.Pieces[i] = metainfo.NewRandomHash()
+	}
+
+	// Encode info to bytes
+	infoBytes, err := bencode.EncodeBytes(info)
+	if err != nil {
+		t.Fatalf("Failed to encode info: %v", err)
+	}
+
+	// Create metainfo structure
+	metaInfo := metainfo.MetaInfo{
+		InfoBytes: infoBytes,
+		Announce:  "http://tracker.example.com/announce",
+		Comment:   "Test torrent for unit tests",
+		CreatedBy: "go-i2p-bt-test",
+	}
+
+	// Encode to bytes
+	metainfoBytes, err := bencode.EncodeBytes(metaInfo)
+	if err != nil {
+		t.Fatalf("Failed to encode metainfo: %v", err)
+	}
+
+	return metainfoBytes
+}
+
+// Benchmark torrent operations
+func BenchmarkAddTorrent(b *testing.B) {
+	config := createTestTorrentManagerConfig()
+	config.MaxTorrents = 10000 // Allow many torrents for benchmarking
+
+	tm, err := NewTorrentManager(config)
+	if err != nil {
+		b.Fatalf("Failed to create TorrentManager: %v", err)
+	}
+	defer tm.Close()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		metainfoBytes := createTestMetainfoBytesWithName(&testing.T{}, fmt.Sprintf("benchmark_torrent_%d", i))
+		req := TorrentAddRequest{
+			Metainfo: base64.StdEncoding.EncodeToString(metainfoBytes),
+			Paused:   true,
+		}
+		_, err := tm.AddTorrent(req)
+		if err != nil {
+			b.Fatalf("Failed to add torrent: %v", err)
+		}
+	}
+}
