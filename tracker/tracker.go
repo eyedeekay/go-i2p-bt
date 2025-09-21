@@ -214,37 +214,56 @@ type ClientConfig struct {
 
 // NewClient returns a new Client.
 func NewClient(connURL string, conf ...ClientConfig) (c Client, err error) {
+	config := extractConfig(conf)
+	
+	u, err := url.Parse(connURL)
+	if err != nil {
+		return nil, err
+	}
+
+	switch u.Scheme {
+	case "http", "https":
+		c = createHTTPClient(connURL, config)
+	case "udp", "udp4", "udp6":
+		c, err = createUDPClient(connURL, u, config)
+	default:
+		err = fmt.Errorf("unknown url scheme '%s'", u.Scheme)
+	}
+	return
+}
+
+// extractConfig extracts the configuration from optional parameters.
+func extractConfig(conf []ClientConfig) ClientConfig {
 	var config ClientConfig
 	if len(conf) > 0 {
 		config = conf[0]
 	}
+	return config
+}
 
-	u, err := url.Parse(connURL)
-	if err == nil {
-		switch u.Scheme {
-		case "http", "https":
-			tracker := httptracker.NewClient(connURL, "")
-			if !config.ID.IsZero() {
-				tracker.ID = config.ID
-			}
-			c = &tclient{url: connURL, http: tracker}
-
-		case "udp", "udp4", "udp6":
-			var utc *udptracker.Client
-			config := udptracker.ClientConfig{ID: config.ID}
-			utc, err = udptracker.NewClientByDial(u.Scheme, u.Host, config)
-			if err == nil {
-				var e []udptracker.Extension
-				if p := u.RequestURI(); p != "" {
-					e = []udptracker.Extension{udptracker.NewURLData([]byte(p))}
-				}
-				c = &tclient{url: connURL, exts: e, udp: utc}
-			}
-		default:
-			err = fmt.Errorf("unknown url scheme '%s'", u.Scheme)
-		}
+// createHTTPClient creates a new HTTP tracker client with the given configuration.
+func createHTTPClient(connURL string, config ClientConfig) Client {
+	tracker := httptracker.NewClient(connURL, "")
+	if !config.ID.IsZero() {
+		tracker.ID = config.ID
 	}
-	return
+	return &tclient{url: connURL, http: tracker}
+}
+
+// createUDPClient creates a new UDP tracker client with the given configuration.
+func createUDPClient(connURL string, u *url.URL, config ClientConfig) (Client, error) {
+	udpConfig := udptracker.ClientConfig{ID: config.ID}
+	utc, err := udptracker.NewClientByDial(u.Scheme, u.Host, udpConfig)
+	if err != nil {
+		return nil, err
+	}
+
+	var exts []udptracker.Extension
+	if p := u.RequestURI(); p != "" {
+		exts = []udptracker.Extension{udptracker.NewURLData([]byte(p))}
+	}
+	
+	return &tclient{url: connURL, exts: exts, udp: utc}, nil
 }
 
 type tclient struct {
