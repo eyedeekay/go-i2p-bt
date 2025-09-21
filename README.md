@@ -5,7 +5,7 @@ A pure golang implementation of [BitTorrent](http://bittorrent.org/beps/bep_0000
 
 ## Install
 ```shell
-$ go get -u github.com/go-i2p/bt
+$ go get -u github.com/go-i2p/go-i2p-bt
 ```
 
 
@@ -73,7 +73,7 @@ func getPeersFromTrackers(id, infohash metainfo.Hash, trackers []string) (peers 
 	defer cancel()
 
 	resp := tracker.GetPeers(c, id, infohash, trackers)
-	for r := range resp {
+	for _, r := range resp {
 		for _, addr := range r.Resp.Addresses {
 			addrs := addr.String()
 			nonexist := true
