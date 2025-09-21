@@ -214,8 +214,35 @@ func (m *RPCMethods) TorrentRemove(req TorrentActionRequest) error {
 	return nil
 }
 
-// TorrentSet implements the torrent-set RPC method
-// Supports comprehensive torrent configuration with validation and error handling
+// TorrentSet implements the torrent-set RPC method from the Transmission RPC protocol.
+// It provides comprehensive torrent configuration with validation and error handling.
+//
+// Supported operations include:
+//   - File selection and priority management (files-wanted, files-unwanted, priority-high/low/normal)
+//   - Tracker management (trackerAdd, trackerRemove, trackerReplace)
+//   - Seeding configuration (seedRatioLimit, seedIdleLimit, seedRatioMode, seedIdleMode)
+//   - Bandwidth and peer limits (bandwidthPriority, peer-limit)
+//   - Download location changes (location, move flag)
+//   - General torrent properties (labels, honorsSessionLimits)
+//
+// The method validates all input parameters, resolves torrent IDs, and applies changes
+// atomically per torrent. Errors are collected and returned as aggregated error messages.
+//
+// Parameters:
+//   - req: TorrentActionRequest containing torrent IDs and configuration changes
+//
+// Returns:
+//   - error: RPCError with ErrCodeInvalidArgument for validation failures or torrent resolution errors
+//
+// Example usage:
+//
+//	req := TorrentActionRequest{
+//	    IDs: []interface{}{1, 2},
+//	    FilesWanted: []int64{0, 1},
+//	    SeedRatioLimit: 2.0,
+//	    Labels: []string{"important", "high-priority"},
+//	}
+//	err := methods.TorrentSet(req)
 func (m *RPCMethods) TorrentSet(req TorrentActionRequest) error {
 	// Validate input arguments first to fail fast on invalid requests
 	if err := m.validateTorrentSetRequest(req); err != nil {
@@ -261,8 +288,24 @@ func (m *RPCMethods) TorrentSet(req TorrentActionRequest) error {
 	return nil
 }
 
-// validateTorrentSetRequest validates all torrent-set request parameters
-// according to Transmission RPC specification
+// validateTorrentSetRequest performs comprehensive validation of TorrentActionRequest parameters.
+// This function validates all configurable fields according to Transmission RPC protocol specifications
+// and Go best practices for input validation.
+//
+// Validation rules:
+//   - peer-limit: must be non-negative integer
+//   - seedRatioLimit: must be non-negative float64
+//   - seedIdleLimit: must be non-negative integer
+//   - seedRatioMode: must be 0 (session default), 1 (torrent setting), or 2 (unlimited)
+//   - seedIdleMode: must be 0 (session default), 1 (torrent setting), or 2 (unlimited)
+//   - bandwidthPriority: must be -1 (low), 0 (normal), or 1 (high)
+//   - trackerReplace: must contain exactly 2 elements [tracker_id, new_url]
+//
+// Parameters:
+//   - req: TorrentActionRequest to validate
+//
+// Returns:
+//   - error: validation error message or nil if valid
 func (m *RPCMethods) validateTorrentSetRequest(req TorrentActionRequest) error {
 	// Validate peer limit (must be non-negative)
 	if req.PeerLimit < 0 {
@@ -302,7 +345,26 @@ func (m *RPCMethods) validateTorrentSetRequest(req TorrentActionRequest) error {
 	return nil
 }
 
-// applyTorrentChanges applies all requested changes to a single torrent
+// applyTorrentChanges applies all requested configuration changes to a single torrent.
+// This function coordinates the application of different types of changes while maintaining
+// data consistency and proper error handling.
+//
+// The function processes changes in a specific order:
+//  1. File array initialization (if needed)
+//  2. Bandwidth priority updates
+//  3. Peer limit configuration
+//  4. File selection and priority changes
+//  5. Tracker management operations
+//  6. Seeding configuration updates
+//  7. Download location changes
+//  8. General torrent properties (labels, session limits)
+//
+// Parameters:
+//   - torrent: TorrentState to modify
+//   - req: TorrentActionRequest containing the changes to apply
+//
+// Returns:
+//   - error: aggregated error message if any operation fails, nil on success
 func (m *RPCMethods) applyTorrentChanges(torrent *TorrentState, req TorrentActionRequest) error {
 	// Initialize file arrays if needed based on MetaInfo
 	if err := m.ensureFileArraysInitialized(torrent); err != nil {
@@ -391,7 +453,22 @@ func (m *RPCMethods) ensureFileArraysInitialized(torrent *TorrentState) error {
 	return nil
 }
 
-// updateFileSelection handles files-wanted and files-unwanted arrays with bounds checking
+// updateFileSelection handles files-wanted and files-unwanted arrays with comprehensive bounds checking.
+// This function manages which files in a multi-file torrent should be downloaded.
+//
+// The function processes two types of file selection changes:
+//   - files-wanted: marks specified files as wanted for download
+//   - files-unwanted: marks specified files as unwanted (skipped)
+//
+// File indices are validated against the torrent's file array bounds.
+// Invalid indices result in descriptive error messages.
+//
+// Parameters:
+//   - torrent: TorrentState containing the file arrays to modify
+//   - req: TorrentActionRequest with FilesWanted and FilesUnwanted arrays
+//
+// Returns:
+//   - error: bounds checking error if any file index is invalid, nil on success
 func (m *RPCMethods) updateFileSelection(torrent *TorrentState, req TorrentActionRequest) error {
 	// Process files-wanted
 	for _, fileIndex := range req.FilesWanted {
@@ -412,7 +489,27 @@ func (m *RPCMethods) updateFileSelection(torrent *TorrentState, req TorrentActio
 	return nil
 }
 
-// updateFilePriorities handles priority arrays with bounds checking
+// updateFilePriorities handles priority arrays with comprehensive bounds checking.
+// This function manages download priorities for individual files in multi-file torrents.
+//
+// Priority levels supported:
+//   - High priority (1): Files are downloaded first
+//   - Normal priority (0): Files are downloaded normally
+//   - Low priority (-1): Files are downloaded last
+//
+// The function processes three priority arrays:
+//   - priority-high: sets specified files to high priority
+//   - priority-normal: sets specified files to normal priority
+//   - priority-low: sets specified files to low priority
+//
+// File indices are validated against the torrent's priority array bounds.
+//
+// Parameters:
+//   - torrent: TorrentState containing the priority array to modify
+//   - req: TorrentActionRequest with PriorityHigh, PriorityNormal, PriorityLow arrays
+//
+// Returns:
+//   - error: bounds checking error if any file index is invalid, nil on success
 func (m *RPCMethods) updateFilePriorities(torrent *TorrentState, req TorrentActionRequest) error {
 	// Helper function to validate and set priority
 	setPriority := func(indices []int64, priority int64, priorityName string) error {
@@ -443,7 +540,26 @@ func (m *RPCMethods) updateFilePriorities(torrent *TorrentState, req TorrentActi
 	return nil
 }
 
-// updateTrackers handles tracker add/remove/replace operations
+// updateTrackers handles tracker add/remove/replace operations with validation and duplicate checking.
+// This function manages the tracker list for torrents, supporting all Transmission RPC tracker operations.
+//
+// Supported operations:
+//   - trackerAdd: adds new tracker URLs, skipping duplicates
+//   - trackerRemove: removes trackers by index with bounds checking
+//   - trackerReplace: replaces tracker at specified index with new URL
+//
+// The function maintains tracker list integrity by:
+//   - Validating tracker URLs are not empty/whitespace
+//   - Checking for duplicate URLs before adding
+//   - Validating array indices for remove/replace operations
+//   - Type checking trackerReplace parameters
+//
+// Parameters:
+//   - torrent: TorrentState containing the tracker list to modify
+//   - req: TorrentActionRequest with TrackerAdd, TrackerRemove, TrackerReplace arrays
+//
+// Returns:
+//   - error: validation or bounds checking error, nil on success
 func (m *RPCMethods) updateTrackers(torrent *TorrentState, req TorrentActionRequest) error {
 	// Add new trackers with duplicate checking
 	for _, tracker := range req.TrackerAdd {
@@ -529,7 +645,31 @@ func (m *RPCMethods) updateTrackers(torrent *TorrentState, req TorrentActionRequ
 	return nil
 }
 
-// updateTorrentLocation handles location changes with validation
+// updateTorrentLocation handles download location changes with validation and move support.
+// This function updates the download directory for a torrent, with optional file moving capability.
+//
+// Location validation:
+//   - Location string cannot be empty or whitespace-only
+//   - Location is trimmed of leading/trailing whitespace before validation
+//
+// Move functionality:
+//   - When move=false: only updates the download directory path
+//   - When move=true: would move actual files to new location (not yet implemented)
+//
+// Note: Physical file moving is not implemented in this minimal viable solution.
+// In a full implementation, move=true would handle file system operations including:
+//   - Source file existence verification
+//   - Destination directory creation
+//   - Atomic file moving with rollback on failure
+//   - Path updates in torrent state
+//
+// Parameters:
+//   - torrent: TorrentState to update
+//   - location: new download directory path
+//   - move: whether to move files physically (currently logged but not implemented)
+//
+// Returns:
+//   - error: validation error if location is empty/whitespace, nil on success
 func (m *RPCMethods) updateTorrentLocation(torrent *TorrentState, location string, move bool) error {
 	// Validate the new location
 	if strings.TrimSpace(location) == "" {
