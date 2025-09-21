@@ -14,11 +14,13 @@
 
 package peerprotocol
 
-var _ Handler = NoopHandler{}
-var _ Bep3Handler = NoopBep3Handler{}
-var _ Bep5Handler = NoopBep5Handler{}
-var _ Bep6Handler = NoopBep6Handler{}
-var _ Bep10Handler = NoopBep10Handler{}
+var (
+	_ Handler      = NoopHandler{}
+	_ Bep3Handler  = NoopBep3Handler{}
+	_ Bep5Handler  = NoopBep5Handler{}
+	_ Bep6Handler  = NoopBep6Handler{}
+	_ Bep10Handler = NoopBep10Handler{}
+)
 
 // NoopHandler implements the interface Handler to do nothing,
 // which is used to be embedded into other structure to not implement

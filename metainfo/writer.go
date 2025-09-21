@@ -45,7 +45,7 @@ type writer struct {
 // Notice: fileMode is only used when writing the data.
 func NewWriter(rootDir string, info Info, fileMode os.FileMode) Writer {
 	if fileMode == 0 {
-		fileMode = 0600
+		fileMode = 0o600
 	}
 
 	return &writer{
@@ -63,7 +63,7 @@ func (w *writer) open(filename string) (f *os.File, err error) {
 
 	f, ok := w.files[filename]
 	if !ok {
-		if err = os.MkdirAll(filepath.Dir(filename), 0700); err == nil {
+		if err = os.MkdirAll(filepath.Dir(filename), 0o700); err == nil {
 			if f, err = os.OpenFile(filename, wflag, w.mode); err == nil {
 				w.files[filename] = f
 			}

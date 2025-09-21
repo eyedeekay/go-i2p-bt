@@ -101,8 +101,8 @@ func NewAddressesFromString(s string) (addrs []Address, err error) {
 	shost, sport, err := net.SplitHostPort(s)
 	if err != nil {
 		if sport == "" && strings.HasSuffix(shost, ".i2p") {
-			//Skip the missing port error if the address is an i2p address,
-			//since the port is optional and we can assign 6881 automatically.
+			// Skip the missing port error if the address is an i2p address,
+			// since the port is optional and we can assign 6881 automatically.
 			sport = "6881"
 		} else {
 			return nil, fmt.Errorf("invalid address '%s': %s", s, err)
@@ -160,8 +160,8 @@ func (a *Address) FromString(addr string) (err error) {
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
 		if port == "" && strings.HasSuffix(host, ".i2p") {
-			//Skip the missing port error if the address is an i2p address,
-			//since the port is optional and we can assign 6881 automatically.
+			// Skip the missing port error if the address is an i2p address,
+			// since the port is optional and we can assign 6881 automatically.
 			port = "6881"
 		} else {
 			return fmt.Errorf("invalid address '%s': %s", addr, err)

@@ -25,8 +25,8 @@ import (
 	"fmt"
 	"net"
 
-	"github.com/go-i2p/i2pkeys"
 	"github.com/go-i2p/go-i2p-bt/metainfo"
+	"github.com/go-i2p/i2pkeys"
 )
 
 // ProtocolID is magic constant for the udp tracker connection.

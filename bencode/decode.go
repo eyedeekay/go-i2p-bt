@@ -118,7 +118,7 @@ func (d *Decoder) Decode(val interface{}) error {
 	if rv.Kind() != reflect.Ptr || rv.IsNil() {
 		return errors.New("Unwritable type passed into decode")
 	}
-	//log.Printf("Decoding %s", rv)
+	// log.Printf("Decoding %s", rv)
 	return d.decodeInto(rv)
 }
 

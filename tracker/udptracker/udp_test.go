@@ -29,7 +29,8 @@ type testHandler struct{}
 
 func (testHandler) OnConnect(raddr net.Addr) (err error) { return }
 func (testHandler) OnAnnounce(raddr net.Addr, req AnnounceRequest) (
-	r AnnounceResponse, err error) {
+	r AnnounceResponse, err error,
+) {
 	if req.Port != 80 {
 		err = errors.New("port is not 80")
 		return
@@ -54,8 +55,10 @@ func (testHandler) OnAnnounce(raddr net.Addr, req AnnounceRequest) (
 	}
 	return
 }
+
 func (testHandler) OnScrap(raddr net.Addr, infohashes []metainfo.Hash) (
-	rs []ScrapeResponse, err error) {
+	rs []ScrapeResponse, err error,
+) {
 	rs = make([]ScrapeResponse, len(infohashes))
 	for i := range infohashes {
 		rs[i] = ScrapeResponse{

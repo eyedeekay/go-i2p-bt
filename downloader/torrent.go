@@ -178,7 +178,8 @@ func (d *TorrentDownloader) worker() {
 
 // download performs the torrent metadata download from a peer.
 func (d *TorrentDownloader) download(host string, port uint16,
-	peerID, infohash metainfo.Hash) (err error) {
+	peerID, infohash metainfo.Hash,
+) (err error) {
 	conn, err := d.establishConnection(host, port, peerID, infohash)
 	if err != nil {
 		return err
@@ -194,7 +195,8 @@ func (d *TorrentDownloader) download(host string, port uint16,
 
 // establishConnection creates and validates a peer connection.
 func (d *TorrentDownloader) establishConnection(host string, port uint16,
-	peerID, infohash metainfo.Hash) (*pp.PeerConn, error) {
+	peerID, infohash metainfo.Hash,
+) (*pp.PeerConn, error) {
 	addr := net.JoinHostPort(host, strconv.FormatUint(uint64(port), 10))
 	conn, err := pp.NewPeerConnByDial(addr, d.conf.ID, infohash, d.conf.DialTimeout)
 	if err != nil {

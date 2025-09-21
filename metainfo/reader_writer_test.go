@@ -40,7 +40,7 @@ func TestWriterAndReader(t *testing.T) {
 	}
 
 	r := NewReader("", info)
-	w := NewWriter("", info, 0600)
+	w := NewWriter("", info, 0o600)
 	defer func() {
 		w.Close()
 		r.Close()

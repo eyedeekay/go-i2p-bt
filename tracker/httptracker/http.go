@@ -360,7 +360,7 @@ func Base32(b64addr string) string {
 		if err != nil {
 			return ""
 		}
-		//hash.Write([]byte(b64))
+		// hash.Write([]byte(b64))
 		var s []byte
 		for _, e := range sha256.Sum256(b64) {
 			s = append(s, e)

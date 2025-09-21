@@ -69,7 +69,7 @@ func TestDecode(t *testing.T) {
 
 	now := time.Now()
 
-	var decodeCases = []testCase{
+	decodeCases := []testCase{
 		// integers
 		{`i5e`, new(int), int(5), false, false},
 		{`i-10e`, new(int), int(-10), false, false},
@@ -223,7 +223,8 @@ func TestDecode(t *testing.T) {
 		}{Embedded{"foo"}}, false, false},
 
 		// Don't fail when reading keys missing from the struct
-		{"d1:A7:discard1:B4:take1:C7:discard1:D4:takee",
+		{
+			"d1:A7:discard1:B4:take1:C7:discard1:D4:takee",
 			new(discardNonFieldDef),
 			discardNonFieldDef{"take", "take"},
 			false,
@@ -231,8 +232,11 @@ func TestDecode(t *testing.T) {
 		},
 
 		// Don't fail when reading the same key twice
-		{"d1:A1:a1:A1:b1:A1:c1:A1:de", new(twoDefsForSameKey),
-			twoDefsForSameKey{"", "", "d"}, false, false},
+		{
+			"d1:A1:a1:A1:b1:A1:c1:A1:de", new(twoDefsForSameKey),
+			twoDefsForSameKey{"", "", "d"},
+			false, false,
+		},
 
 		// Empty struct
 		{"de", new(struct{}), struct{}{}, false, false},
@@ -268,7 +272,7 @@ func TestRawDecode(t *testing.T) {
 		err    bool
 	}
 
-	var rawDecodeCases = []testCase{
+	rawDecodeCases := []testCase{
 		{`i5e`, []byte(`i5e`), false},
 		{`5:hello`, []byte(`5:hello`), false},
 		{`li5ei10e5:helloe`, []byte(`li5ei10e5:helloe`), false},
@@ -364,7 +368,7 @@ func TestNestedRawDecode(t *testing.T) {
 		Raw RawMessage
 	}
 
-	var cases = []testCase{
+	cases := []testCase{
 		{`li5e5:hellod1:a1:beli5eee`, new([]RawMessage), []RawMessage{
 			RawMessage(`i5e`),
 			RawMessage(`5:hello`),

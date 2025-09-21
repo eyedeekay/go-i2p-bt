@@ -19,8 +19,8 @@ import (
 	"errors"
 	"net"
 
-	"github.com/go-i2p/i2pkeys"
 	"github.com/go-i2p/go-i2p-bt/bencode"
+	"github.com/go-i2p/i2pkeys"
 )
 
 var errInvalidIP = errors.New("invalid ipv4 or ipv6")
@@ -47,7 +47,7 @@ const (
 type CompactIP []byte
 
 func (ci CompactIP) String() string {
-	//return net.IP(ci).String()
+	// return net.IP(ci).String()
 	switch len(ci) {
 	case net.IPv4len:
 		return net.IP(ci).String()

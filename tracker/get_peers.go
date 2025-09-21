@@ -65,7 +65,8 @@ func createRequestChannel(trackers []string, workerCount int) chan string {
 
 // spawnWorkerRoutines creates worker goroutines to process tracker requests concurrently.
 func spawnWorkerRoutines(ctx context.Context, workerCount int, reqs chan string,
-	wg *sync.WaitGroup, id, infohash metainfo.Hash, lock *sync.Mutex, results *[]GetPeersResult) {
+	wg *sync.WaitGroup, id, infohash metainfo.Hash, lock *sync.Mutex, results *[]GetPeersResult,
+) {
 	for i := 0; i < workerCount; i++ {
 		go func() {
 			for tracker := range reqs {
@@ -112,7 +113,8 @@ func GetPeers(ctx context.Context, id, infohash metainfo.Hash, trackers []string
 }
 
 func getPeers(ctx context.Context, wg *sync.WaitGroup, tracker string,
-	nodeID, infoHash metainfo.Hash) (resp AnnounceResponse, err error) {
+	nodeID, infoHash metainfo.Hash,
+) (resp AnnounceResponse, err error) {
 	defer wg.Done()
 
 	client, err := NewClient(tracker, ClientConfig{ID: nodeID})

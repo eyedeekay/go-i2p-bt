@@ -117,7 +117,7 @@ func (utc *Client) parseError(b []byte) (tid uint32, reason string) {
 
 func (utc *Client) send(b []byte) (err error) {
 	n, err := utc.conn.Write(b)
-	//n, err := utc.conn.WriteTo()
+	// n, err := utc.conn.WriteTo()
 	if err == nil && n < len(b) {
 		err = io.ErrShortWrite
 	}
@@ -176,7 +176,8 @@ func (utc *Client) getConnectionID(ctx context.Context) (cid uint64, err error) 
 }
 
 func (utc *Client) announce(ctx context.Context, req AnnounceRequest) (
-	r AnnounceResponse, err error) {
+	r AnnounceResponse, err error,
+) {
 	cid, err := utc.getConnectionID(ctx)
 	if err != nil {
 		return
@@ -260,7 +261,8 @@ func (utc *Client) Announce(c context.Context, r *AnnounceRequest) (AnnounceResp
 }
 
 func (utc *Client) scrape(c context.Context, ihs []metainfo.Hash) (
-	rs []ScrapeResponse, err error) {
+	rs []ScrapeResponse, err error,
+) {
 	cid, tid, err := utc.setupScrapeConnection(c)
 	if err != nil {
 		return

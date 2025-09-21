@@ -33,7 +33,8 @@ type BlockDownloadHandler struct {
 // NewBlockDownloadHandler returns a new BlockDownloadHandler.
 func NewBlockDownloadHandler(info metainfo.Info,
 	onBlock func(pieceIndex, pieceOffset uint32, b []byte) error,
-	requestBlock func(c *pp.PeerConn) error) BlockDownloadHandler {
+	requestBlock func(c *pp.PeerConn) error,
+) BlockDownloadHandler {
 	return BlockDownloadHandler{
 		Info:         info,
 		OnBlock:      onBlock,

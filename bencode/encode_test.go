@@ -68,7 +68,7 @@ func TestEncode(t *testing.T) {
 
 	now := time.Now()
 
-	var encodeCases = []encodeTestCase{
+	encodeCases := []encodeTestCase{
 		// integers
 		{10, `i10e`, false},
 		{-10, `i-10e`, false},
@@ -330,7 +330,7 @@ func TestEncodeOmit(t *testing.T) {
 		C *int   `bencode:",omitempty"`
 	}
 
-	var encodeCases = []encodeTestCase{
+	encodeCases := []encodeTestCase{
 		{eT{}, `de`, false},
 		{eT{A: "a"}, `d1:A1:ae`, false},
 		{eT{B: 5}, `d1:Bi5ee`, false},

@@ -48,7 +48,8 @@ func (pm *testPeerManager) AddPeer(infohash metainfo.Hash, addr metainfo.Address
 }
 
 func (pm *testPeerManager) GetPeers(infohash metainfo.Hash, maxnum int,
-	ipv6 bool) (addrs []metainfo.Address) {
+	ipv6 bool,
+) (addrs []metainfo.Address) {
 	// We only supports IPv4, so ignore the ipv6 argument.
 	pm.lock.RLock()
 	_addrs := pm.peers[infohash]
@@ -63,12 +64,12 @@ func (pm *testPeerManager) GetPeers(infohash metainfo.Hash, maxnum int,
 }
 
 func onSearch(infohash string, ip net.Addr) {
-	//addr := net.JoinHostPort(ip.String(), strconv.FormatUint(uint64(port), 10))
+	// addr := net.JoinHostPort(ip.String(), strconv.FormatUint(uint64(port), 10))
 	fmt.Printf("%s is searching %s\n", ip.String(), infohash)
 }
 
 func onTorrent(infohash string, ip net.Addr) {
-	//addr := net.JoinHostPort(ip.String(), strconv.FormatUint(uint64(port), 10))
+	// addr := net.JoinHostPort(ip.String(), strconv.FormatUint(uint64(port), 10))
 	fmt.Printf("%s has downloaded %s\n", ip.String(), infohash)
 }
 
@@ -86,8 +87,10 @@ func ExampleServer() {
 	id1 := metainfo.NewRandomHash()
 	id2 := metainfo.NewRandomHash()
 	id3 := metainfo.NewRandomHash()
-	infohash := metainfo.Hash{1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
-		11, 12, 13, 14, 15, 16, 17, 18, 19, 20}
+	infohash := metainfo.Hash{
+		1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
+		11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
+	}
 
 	// Create first DHT server
 	pm := newTestPeerManager()

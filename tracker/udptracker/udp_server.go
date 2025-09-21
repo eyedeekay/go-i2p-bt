@@ -192,7 +192,8 @@ func (uts *Server) sendConnResp(raddr net.Addr, tid uint32, cid uint64) {
 }
 
 func (uts *Server) sendAnnounceResp(raddr net.Addr, tid uint32,
-	resp AnnounceResponse) {
+	resp AnnounceResponse,
+) {
 	buf := bytes.NewBuffer(make([]byte, 0, 8+12+len(resp.Addresses)*18))
 	encodeResponseHeader(buf, ActionAnnounce, tid)
 	resp.EncodeTo(buf)
@@ -200,7 +201,8 @@ func (uts *Server) sendAnnounceResp(raddr net.Addr, tid uint32,
 }
 
 func (uts *Server) sendScrapResp(raddr net.Addr, tid uint32,
-	rs []ScrapeResponse) {
+	rs []ScrapeResponse,
+) {
 	buf := bytes.NewBuffer(make([]byte, 0, 8+len(rs)*12))
 	encodeResponseHeader(buf, ActionScrape, tid)
 	for _, r := range rs {

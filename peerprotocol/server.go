@@ -96,7 +96,8 @@ type Server struct {
 
 // NewServerByListen returns a new Server by listening on the address.
 func NewServerByListen(network, address string, id metainfo.Hash, h Handler,
-	c ...Config) (*Server, error) {
+	c ...Config,
+) (*Server, error) {
 	ln, err := Listen(network, address)
 	if err != nil {
 		return nil, err

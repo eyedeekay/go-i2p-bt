@@ -104,7 +104,8 @@ func writeFiles(w io.Writer, files []File, open func(File) (io.ReadCloser, error
 
 // GeneratePiecesFromFiles generates the pieces from the files.
 func GeneratePiecesFromFiles(files []File, pieceLength int64,
-	open func(File) (io.ReadCloser, error)) (Hashes, error) {
+	open func(File) (io.ReadCloser, error),
+) (Hashes, error) {
 	if pieceLength <= 0 {
 		return nil, errors.New("piece length must be a positive integer")
 	}

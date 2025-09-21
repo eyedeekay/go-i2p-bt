@@ -179,7 +179,8 @@ func (sr ScrapeResponse) FromHTTPScrapeResponse(r httptracker.ScrapeResponse) {
 
 // FromUDPScrapeResponse sets itself from hs and r.
 func (sr ScrapeResponse) FromUDPScrapeResponse(hs []metainfo.Hash,
-	r []udptracker.ScrapeResponse) {
+	r []udptracker.ScrapeResponse,
+) {
 	klen := len(hs)
 	if _len := len(r); _len < klen {
 		klen = _len

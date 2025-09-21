@@ -30,7 +30,8 @@ type testHandler struct{}
 
 func (testHandler) OnConnect(raddr net.Addr) (err error) { return }
 func (testHandler) OnAnnounce(raddr net.Addr, req udptracker.AnnounceRequest) (
-	r udptracker.AnnounceResponse, err error) {
+	r udptracker.AnnounceResponse, err error,
+) {
 	if req.Port != 80 {
 		err = errors.New("port is not 80")
 		return
@@ -55,8 +56,10 @@ func (testHandler) OnAnnounce(raddr net.Addr, req udptracker.AnnounceRequest) (
 	}
 	return
 }
+
 func (testHandler) OnScrap(raddr net.Addr, infohashes []metainfo.Hash) (
-	rs []udptracker.ScrapeResponse, err error) {
+	rs []udptracker.ScrapeResponse, err error,
+) {
 	rs = make([]udptracker.ScrapeResponse, len(infohashes))
 	for i := range infohashes {
 		rs[i] = udptracker.ScrapeResponse{

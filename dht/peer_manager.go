@@ -126,7 +126,8 @@ func (tpm *tokenPeerManager) Stop() {
 }
 
 func (tpm *tokenPeerManager) GetPeers(infohash metainfo.Hash, maxnum int,
-	ipv6 bool) (addrs []metainfo.Address) {
+	ipv6 bool,
+) (addrs []metainfo.Address) {
 	addrs = make([]metainfo.Address, 0, maxnum)
 	tpm.lock.RLock()
 	if peers, ok := tpm.peers[infohash]; ok {
@@ -134,8 +135,8 @@ func (tpm *tokenPeerManager) GetPeers(infohash metainfo.Hash, maxnum int,
 			if maxnum < 1 {
 				break
 			}
-			//if ipv6 { // For IPv6
-			//if isIPv6(peer.IP) {
+			// if ipv6 { // For IPv6
+			// if isIPv6(peer.IP) {
 			maxnum--
 			addrs = append(addrs, metainfo.NewAddress(peer.IP, peer.Port))
 			//}

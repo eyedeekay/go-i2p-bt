@@ -36,8 +36,10 @@ var (
 	ErrNoExtHandshake     = fmt.Errorf("no extended handshake")
 )
 
-var DialTimeout = net.DialTimeout
-var Dial = net.Dial
+var (
+	DialTimeout = net.DialTimeout
+	Dial        = net.Dial
+)
 
 // Bep3Handler is used to handle the BEP 3 type message if Handler has also
 // implemented the interface.

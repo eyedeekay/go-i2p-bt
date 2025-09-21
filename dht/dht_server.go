@@ -785,7 +785,8 @@ func (s *Server) processResponseNodes(t *transaction, m krpc.Message) (found boo
 
 // processNodeList processes a list of nodes and updates the collection.
 func (s *Server) processNodeList(nodeList []krpc.Node, targetHash metainfo.Hash,
-	ids metainfo.Hashes, readOnly bool, nodes *[]krpc.Node, updatedIds *metainfo.Hashes) bool {
+	ids metainfo.Hashes, readOnly bool, nodes *[]krpc.Node, updatedIds *metainfo.Hashes,
+) bool {
 	var found bool
 
 	for _, node := range nodeList {
@@ -812,7 +813,8 @@ func (s *Server) continueRecursiveSearch(t *transaction, nodes []krpc.Node, ids 
 }
 
 func (s *Server) getPeers(info metainfo.Hash, addr metainfo.Address, depth int,
-	ids metainfo.Hashes, cb ...func(Result)) {
+	ids metainfo.Hashes, cb ...func(Result),
+) {
 	arg := krpc.QueryArg{InfoHash: info, Wants: s.want}
 	t := newTransaction(s, addr.Addr(), queryMethodGetPeers, arg, cb...)
 	t.OnResponse = s.onGetPeersResp
@@ -942,7 +944,8 @@ func (s *Server) FindNode(addr net.Addr, target metainfo.Hash) error {
 }
 
 func (s *Server) findNode(target metainfo.Hash, addr net.Addr, depth int,
-	ids metainfo.Hashes) error {
+	ids metainfo.Hashes,
+) error {
 	arg := krpc.QueryArg{Target: target, Wants: s.want}
 	t := newTransaction(s, addr, queryMethodFindNode, arg)
 	t.OnResponse = s.onFindNodeResp
@@ -984,7 +987,8 @@ func (s *Server) processFoundNodes(t *transaction, m krpc.Message) (found bool, 
 
 // processFindNodeList processes a node list and checks for target node or new nodes to visit.
 func (s *Server) processFindNodeList(nodeList []krpc.Node, target metainfo.Hash,
-	ids metainfo.Hashes, readOnly bool, nodes *[]krpc.Node, updatedIds *metainfo.Hashes) bool {
+	ids metainfo.Hashes, readOnly bool, nodes *[]krpc.Node, updatedIds *metainfo.Hashes,
+) bool {
 	var found bool
 
 	for _, node := range nodeList {

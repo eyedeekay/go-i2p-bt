@@ -49,7 +49,8 @@ func (t *transaction) Done(r Result) {
 
 func noopResponse(*transaction, net.Addr, krpc.Message) {}
 func newTransaction(s *Server, a net.Addr, q string, qa krpc.QueryArg,
-	callback ...func(Result)) *transaction {
+	callback ...func(Result),
+) *transaction {
 	var cb func(Result)
 	if len(callback) > 0 {
 		cb = callback[0]

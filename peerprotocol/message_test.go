@@ -21,7 +21,8 @@ import (
 func TestBitField(t *testing.T) {
 	bf := NewBitFieldFromBools([]bool{
 		false, true, false, true, false, true, true, true,
-		false, false, true, false, false, true, true, false})
+		false, false, true, false, false, true, true, false,
+	})
 	if bf.IsSet(0) {
 		t.Error(0)
 	} else if !bf.IsSet(1) {
