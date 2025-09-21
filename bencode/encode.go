@@ -413,11 +413,11 @@ func processFieldTag(key reflect.StructField, fieldValue reflect.Value) (string,
 // struct embedding and regular field appending.
 func handleFieldValue(dict dictionary, key reflect.StructField, fieldValue reflect.Value, rkey string) (dictionary, error) {
 	tagValue := key.Tag.Get("bencode")
-	
+
 	if shouldEmbedAnonymousStruct(key, tagValue) {
 		return readStruct(dict, fieldValue)
 	}
-	
+
 	return append(dict, definition{rkey, fieldValue}), nil
 }
 
