@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package blockdownload
+package blockupload
 
 import (
 	"github.com/go-i2p/go-i2p-bt/metainfo"

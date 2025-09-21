@@ -1,4 +1,4 @@
-# BT - Another Implementation For Golang [![Build Status](https://github.com/go-i2p/bt/actions/workflows/go.yml/badge.svg)](https://github.com/go-i2p/bt/actions/workflows/go.yml) [![GoDoc](https://pkg.go.dev/badge/github.com/go-i2p/bt)](https://pkg.go.dev/github.com/go-i2p/bt) [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg?style=flat-square)](https://raw.githubusercontent.com/go-i2p/bt/master/LICENSE)
+# BT - Another Implementation For Golang [![Build Status](https://github.com/go-i2p/go-i2p-bt/actions/workflows/go.yml/badge.svg)](https://github.com/go-i2p/go-i2p-bt/actions/workflows/go.yml) [![GoDoc](https://pkg.go.dev/badge/github.com/go-i2p/go-i2p-bt)](https://pkg.go.dev/github.com/go-i2p/go-i2p-bt) [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg?style=flat-square)](https://raw.githubusercontent.com/go-i2p/go-i2p-bt/master/LICENSE)
 
 A pure golang implementation of [BitTorrent](http://bittorrent.org/beps/bep_0000.html) library, which is inspired by [dht](https://github.com/shiyanhui/dht) and [torrent](https://github.com/anacrolix/torrent).
 
@@ -11,11 +11,11 @@ $ go get -u github.com/go-i2p/go-i2p-bt
 
 ## Features
 
-- Support `Go1.9+`.
+- Requires `Go 1.23.1+`.
 - Support I2P, IPv4/IPv6.
 - Multi-BEPs implementation.
 - Pure Go implementation without `CGO`.
-- Only library without any denpendencies. For the command tools, see [bttools](https://github.com/go-i2p/bttools).
+- Minimal dependencies (only I2P-related packages). For the command tools, see [bttools](https://github.com/go-i2p/bttools).
 
 
 ## The Implemented Specifications
@@ -39,7 +39,7 @@ $ go get -u github.com/go-i2p/go-i2p-bt
 
 
 ## Example
-See [godoc](https://pkg.go.dev/github.com/go-i2p/bt) or [bttools](https://github.com/go-i2p/bttools).
+See [godoc](https://pkg.go.dev/github.com/go-i2p/go-i2p-bt) or [bttools](https://github.com/go-i2p/bttools).
 
 ### Example 1: Download the file from the remote peer
 
@@ -57,6 +57,7 @@ import (
 	"time"
 
 	"github.com/go-i2p/go-i2p-bt/downloader"
+	blockdownload "github.com/go-i2p/go-i2p-bt/downloadhandler"
 	"github.com/go-i2p/go-i2p-bt/metainfo"
 	pp "github.com/go-i2p/go-i2p-bt/peerprotocol"
 	"github.com/go-i2p/go-i2p-bt/tracker"
@@ -160,7 +161,7 @@ func downloadFileFromPeer(peer string, id, infohash metainfo.Hash, dm *downloadM
 	}
 
 	info := dm.writer.Info()
-	bdh := downloader.NewBlockDownloadHandler(info, dm.OnBlock, dm.RequestBlock)
+	bdh := blockdownload.NewBlockDownloadHandler(info, dm.OnBlock, dm.RequestBlock)
 	if err = bdh.OnHandShake(pc); err != nil {
 		log.Printf("handshake error with '%s': %s", peer, err)
 		return
