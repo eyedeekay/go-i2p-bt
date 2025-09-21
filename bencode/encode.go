@@ -71,32 +71,59 @@ func encodeValue(w io.Writer, val reflect.Value) error {
 	marshaler, textMarshaler, v := indirectEncodeValue(val)
 
 	// Handle marshaler interfaces
-	if err := encodeMarshalerType(w, marshaler); err != nil {
+	if handled, err := handleMarshalerInterfaces(w, marshaler, textMarshaler); handled || err != nil {
 		return err
 	}
+
+	// Validate value and handle special cases
+	if handled, err := validateAndHandleSpecialCases(w, v); handled || err != nil {
+		return err
+	}
+
+	// Dispatch to type-specific encoders
+	return dispatchTypeSpecificEncoding(w, val, v)
+}
+
+// handleMarshalerInterfaces processes Marshaler and TextMarshaler interfaces.
+// Returns true if the value was handled, false if encoding should continue.
+func handleMarshalerInterfaces(w io.Writer, marshaler Marshaler, textMarshaler encoding.TextMarshaler) (bool, error) {
+	if err := encodeMarshalerType(w, marshaler); err != nil {
+		return true, err
+	}
 	if marshaler != nil {
-		return nil
+		return true, nil
 	}
 
 	if err := encodeTextMarshalerType(w, textMarshaler); err != nil {
-		return err
+		return true, err
 	}
 	if textMarshaler != nil {
-		return nil
+		return true, nil
 	}
 
+	return false, nil
+}
+
+// validateAndHandleSpecialCases validates the value and handles nil pointers and RawMessage types.
+// Returns true if the value was handled, false if encoding should continue.
+func validateAndHandleSpecialCases(w io.Writer, v reflect.Value) (bool, error) {
 	// if indirection returns us an invalid value that means there was a nil
 	// pointer in the path somewhere.
 	if !v.IsValid() {
-		return nil
+		return true, nil
 	}
 
 	// send in a raw message if we have that type
 	if rm, ok := v.Interface().(RawMessage); ok {
 		_, err := io.Copy(w, bytes.NewReader(rm))
-		return err
+		return true, err
 	}
 
+	return false, nil
+}
+
+// dispatchTypeSpecificEncoding routes the value to the appropriate type-specific encoder.
+func dispatchTypeSpecificEncoding(w io.Writer, val, v reflect.Value) error {
 	switch v.Kind() {
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
 		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
