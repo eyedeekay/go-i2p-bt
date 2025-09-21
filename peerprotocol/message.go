@@ -419,29 +419,13 @@ func (m Message) marshalBinaryType(buf *bytes.Buffer) (err error) {
 	case MTypeHave:
 		err = binary.Write(buf, binary.BigEndian, m.Index)
 	case MTypeRequest, MTypeCancel, MTypeReject:
-		if err = binary.Write(buf, binary.BigEndian, m.Index); err != nil {
-			return
-		}
-		if err = binary.Write(buf, binary.BigEndian, m.Begin); err != nil {
-			return
-		}
-		if err = binary.Write(buf, binary.BigEndian, m.Length); err != nil {
-			return
-		}
+		err = m.marshalRequestLikeMessage(buf)
 	case MTypeBitField:
 		buf.Write(m.BitField)
 	case MTypePiece:
-		if err = binary.Write(buf, binary.BigEndian, m.Index); err != nil {
-			return
-		}
-		if err = binary.Write(buf, binary.BigEndian, m.Begin); err != nil {
-			return
-		}
-		_, err = buf.Write(m.Piece)
+		err = m.marshalPieceMessage(buf)
 	case MTypeExtended:
-		if err = buf.WriteByte(byte(m.ExtendedID)); err != nil {
-			_, err = buf.Write(m.ExtendedPayload)
-		}
+		err = m.marshalExtendedMessage(buf)
 	case MTypePort:
 		err = binary.Write(buf, binary.BigEndian, m.Port)
 	default:
@@ -450,4 +434,36 @@ func (m Message) marshalBinaryType(buf *bytes.Buffer) (err error) {
 	}
 
 	return
+}
+
+// marshalRequestLikeMessage encodes request, cancel, and reject messages with index, begin, and length fields.
+func (m Message) marshalRequestLikeMessage(buf *bytes.Buffer) error {
+	if err := binary.Write(buf, binary.BigEndian, m.Index); err != nil {
+		return err
+	}
+	if err := binary.Write(buf, binary.BigEndian, m.Begin); err != nil {
+		return err
+	}
+	return binary.Write(buf, binary.BigEndian, m.Length)
+}
+
+// marshalPieceMessage encodes piece messages containing index, begin offset, and piece data.
+func (m Message) marshalPieceMessage(buf *bytes.Buffer) error {
+	if err := binary.Write(buf, binary.BigEndian, m.Index); err != nil {
+		return err
+	}
+	if err := binary.Write(buf, binary.BigEndian, m.Begin); err != nil {
+		return err
+	}
+	_, err := buf.Write(m.Piece)
+	return err
+}
+
+// marshalExtendedMessage encodes extended protocol messages with ID and payload.
+func (m Message) marshalExtendedMessage(buf *bytes.Buffer) error {
+	if err := buf.WriteByte(byte(m.ExtendedID)); err != nil {
+		return err
+	}
+	_, err := buf.Write(m.ExtendedPayload)
+	return err
 }
