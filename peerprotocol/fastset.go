@@ -42,7 +42,7 @@ func GenerateAllowedFastSet(set []uint32, sz uint32, ip net.IP, infohash metainf
 		// BEP 6: x = 0xFFFFFF00 & ip (use only first 3 bytes, set 4th byte to 0)
 		x = make([]byte, 24) // 4 bytes for IP + 20 bytes for infohash
 		x[0] = ip[0]         // First byte of IP
-		x[1] = ip[1]         // Second byte of IP  
+		x[1] = ip[1]         // Second byte of IP
 		x[2] = ip[2]         // Third byte of IP
 		x[3] = 0             // Fourth byte set to 0 per BEP 6 (0xFFFFFF00 mask)
 		copy(x[4:], infohash[:])
