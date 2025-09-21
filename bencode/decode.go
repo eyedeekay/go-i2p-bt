@@ -138,23 +138,46 @@ func DecodeBytes(b []byte, val interface{}) error {
 	return d.Decode(val)
 }
 
+// handleInterfaceValue processes interface values during indirect resolution.
+// It returns the interface value as-is when allocation is enabled, or an empty
+// value when allocation is disabled for nil interfaces.
+func handleInterfaceValue(v reflect.Value, alloc bool) reflect.Value {
+	if v.IsNil() {
+		if !alloc {
+			return reflect.Value{}
+		}
+		return v
+	}
+	return reflect.Value{} // Continue processing signal
+}
+
+// handlePointerValue processes pointer values during indirect resolution.
+// It allocates new instances for nil pointers when allocation is enabled,
+// or returns an empty value when allocation is disabled.
+func handlePointerValue(v reflect.Value, alloc bool) reflect.Value {
+	if v.IsNil() {
+		if !alloc {
+			return reflect.Value{}
+		}
+		v.Set(reflect.New(v.Type().Elem()))
+	}
+	return reflect.Value{} // Continue processing signal
+}
+
+// indirect resolves interface and pointer indirection to get the underlying value.
+// It continues dereferencing until it reaches a concrete type, with allocation
+// control for nil values.
 func indirect(v reflect.Value, alloc bool) reflect.Value {
 	for {
 		switch v.Kind() {
 		case reflect.Interface:
-			if v.IsNil() {
-				if !alloc {
-					return reflect.Value{}
-				}
-				return v
+			if result := handleInterfaceValue(v, alloc); result.IsValid() {
+				return result
 			}
 
 		case reflect.Ptr:
-			if v.IsNil() {
-				if !alloc {
-					return reflect.Value{}
-				}
-				v.Set(reflect.New(v.Type().Elem()))
+			if result := handlePointerValue(v, alloc); result.IsValid() {
+				return result
 			}
 
 		default:
