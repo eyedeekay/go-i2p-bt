@@ -37,12 +37,24 @@ func GenerateAllowedFastSet(set []uint32, sz uint32, ip net.IP, infohash metainf
 		ip = ipv4
 	}
 
-	iplen := len(ip)
-	x := make([]byte, 20+iplen)
-	for i := 0; i < iplen; i++ { // (1) compatible with IPv4/IPv6 - process all IP bytes per BEP 6
-		x[i] = ip[i] & 0xff //              (1)
+	var x []byte
+	if len(ip) == 4 { // IPv4
+		// BEP 6: x = 0xFFFFFF00 & ip (use only first 3 bytes, set 4th byte to 0)
+		x = make([]byte, 24) // 4 bytes for IP + 20 bytes for infohash
+		x[0] = ip[0]         // First byte of IP
+		x[1] = ip[1]         // Second byte of IP  
+		x[2] = ip[2]         // Third byte of IP
+		x[3] = 0             // Fourth byte set to 0 per BEP 6 (0xFFFFFF00 mask)
+		copy(x[4:], infohash[:])
+	} else {
+		// IPv6 (no official BEP 6 support, but maintain existing behavior for compatibility)
+		iplen := len(ip)
+		x = make([]byte, 20+iplen)
+		for i := 0; i < iplen; i++ {
+			x[i] = ip[i] & 0xff
+		}
+		copy(x[iplen:], infohash[:])
 	}
-	copy(x[iplen:], infohash[:]) // (2)
 
 	for cur, k := 0, len(set); cur < k; {
 		sum := sha1.Sum(x)                  // (3)
