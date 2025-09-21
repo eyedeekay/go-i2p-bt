@@ -165,6 +165,27 @@ func indirect(v reflect.Value, alloc bool) reflect.Value {
 	}
 }
 
+// handleUnmarshalerInterface processes Unmarshaler interface implementations.
+// It delegates the bencode value to the custom unmarshaler for processing.
+func (d *Decoder) handleUnmarshalerInterface(unmarshaler Unmarshaler) error {
+	var x RawMessage
+	if err := d.decodeInto(reflect.ValueOf(&x)); err != nil {
+		return err
+	}
+	return unmarshaler.UnmarshalBencode([]byte(x))
+}
+
+// handleTextUnmarshalerInterface processes TextUnmarshaler interface implementations.
+// It assumes the bencode value is a string and passes it to the text unmarshaler.
+func (d *Decoder) handleTextUnmarshalerInterface(textUnmarshaler encoding.TextUnmarshaler) error {
+	var b []byte
+	ref := reflect.ValueOf(&b)
+	if err := d.decodeString(reflect.Indirect(ref)); err != nil {
+		return err
+	}
+	return textUnmarshaler.UnmarshalText(b)
+}
+
 // decodeInto decodes a bencode value into the provided reflect.Value.
 // It handles special unmarshaler interfaces, raw message processing, and
 // dispatches to appropriate type-specific decode methods.
@@ -183,23 +204,14 @@ func (d *Decoder) decodeInto(val reflect.Value) (err error) {
 		// we pass on the next bencode value to this value instead,
 		// so it can decide what to do with it.
 		if unmarshaler != nil {
-			var x RawMessage
-			if err := d.decodeInto(reflect.ValueOf(&x)); err != nil {
-				return err
-			}
-			return unmarshaler.UnmarshalBencode([]byte(x))
+			return d.handleUnmarshalerInterface(unmarshaler)
 		}
 
 		// if we're decoding into an TextUnmarshaler,
 		// we'll assume that the bencode value is a string,
 		// we decode it as such and pass the result onto the unmarshaler.
 		if textUnmarshaler != nil {
-			var b []byte
-			ref := reflect.ValueOf(&b)
-			if err := d.decodeString(reflect.Indirect(ref)); err != nil {
-				return err
-			}
-			return textUnmarshaler.UnmarshalText(b)
+			return d.handleTextUnmarshalerInterface(textUnmarshaler)
 		}
 
 		// if we're decoding into a RawMessage set raw to true for the rest of
