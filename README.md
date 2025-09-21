@@ -56,10 +56,10 @@ import (
 	"os"
 	"time"
 
-	"github.com/go-i2p/bt/downloader"
-	"github.com/go-i2p/bt/metainfo"
-	pp "github.com/go-i2p/bt/peerprotocol"
-	"github.com/go-i2p/bt/tracker"
+	"github.com/go-i2p/go-i2p-bt/downloader"
+	"github.com/go-i2p/go-i2p-bt/metainfo"
+	pp "github.com/go-i2p/go-i2p-bt/peerprotocol"
+	"github.com/go-i2p/go-i2p-bt/tracker"
 )
 
 var peeraddr string
