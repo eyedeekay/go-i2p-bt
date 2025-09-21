@@ -148,7 +148,7 @@ func (h *Hash) FromString(s string) (err error) {
 		err = fmt.Errorf("hash string has bad length: %d", len(s))
 	}
 
-	return nil
+	return err // Fix: Return actual error instead of always returning nil
 }
 
 // FromHexString resets the info hash from the hex string.
