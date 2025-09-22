@@ -1,4 +1,4 @@
-# BT - Another Implementation For Golang [![Build Status](https://github.com/go-i2p/go-i2p-bt/actions/workflows/go.yml/badge.svg)](https://github.com/go-i2p/go-i2p-bt/actions/workflows/go.yml) [![GoDoc](https://pkg.go.dev/badge/github.com/go-i2p/go-i2p-bt)](https://pkg.go.dev/github.com/go-i2p/go-i2p-bt) [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg?style=flat-square)](https://raw.githubusercontent.com/go-i2p/go-i2p-bt/master/LICENSE)
+# BT - Another Implementation For Golang [![Build Status](https://github.com/go-i2p/go-i2p-bt/actions/workflows/go.yml/badge.svg)](https://github.com/go-i2p/go-i2p-bt/actions/workflows/go.yml) [![GoDoc](https://pkg.go.dev/badge/github.com/go-i2p/go-i2p-bt)](https://pkg.go.dev/github.com/go-i2p/go-i2p-bt) [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg?style=flat-square)](https://raw.githubusercontent.com/go-i2p/go-i2p-bt/main/LICENSE)
 
 A pure golang implementation of [BitTorrent](http://bittorrent.org/beps/bep_0000.html) library, which is inspired by [dht](https://github.com/shiyanhui/dht) and [torrent](https://github.com/anacrolix/torrent).
 
@@ -15,7 +15,10 @@ $ go get -u github.com/go-i2p/go-i2p-bt
 - Support I2P, IPv4/IPv6.
 - Multi-BEPs implementation.
 - Pure Go implementation without `CGO`.
-- Minimal dependencies (only I2P-related packages). For the command tools, see [bttools](https://github.com/go-i2p/bttools).
+- Transmission RPC-compatible HTTP server.
+- Upload/download handlers for file transfer.
+- Real-time torrent statistics and monitoring.
+- Minimal dependencies (only I2P-related packages). For command-line tools built on this library, see [bttools](https://github.com/go-i2p/bttools).
 
 
 ## The Implemented Specifications
@@ -38,6 +41,56 @@ $ go get -u github.com/go-i2p/go-i2p-bt
 - [x] [**BEP 48:** Tracker Protocol Extension: Scrape](http://bittorrent.org/beps/bep_0048.html)
 
 
+## RPC Server
+
+This library includes a Transmission RPC-compatible HTTP server for remote torrent management. The server implements the [Transmission RPC protocol](https://github.com/transmission/transmission/blob/main/docs/rpc-spec.md) with JSON-RPC 2.0 over HTTP.
+
+### Supported RPC Methods
+
+- `torrent-add` - Add new torrents from .torrent files or magnet links
+- `torrent-get` - Retrieve torrent information and statistics
+- `torrent-start` / `torrent-start-now` - Start torrent downloads
+- `torrent-stop` - Stop torrent downloads
+- `torrent-verify` - Verify torrent data integrity
+- `torrent-remove` - Remove torrents (with optional data deletion)
+- `torrent-set` - Modify torrent settings and priorities
+- `session-get` / `session-set` - Manage global session configuration
+- `session-stats` - Retrieve session statistics
+
+### RPC Server Usage
+
+```go
+package main
+
+import (
+    "log"
+    "github.com/go-i2p/go-i2p-bt/rpc"
+)
+
+func main() {
+    // Create a simple server
+    server, err := rpc.NewSimpleServer("/path/to/downloads")
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    // Start the HTTP server
+    log.Println("Starting RPC server on :9091")
+    if err := rpc.StartServer(server, ":9091"); err != nil {
+        log.Fatal(err)
+    }
+}
+```
+
+### Authentication and Security
+
+The server supports HTTP Basic Authentication and session token-based CSRF protection:
+
+```go
+server, err := rpc.NewServerWithAuth("/downloads", "username", "password")
+```
+
+
 ## Example
 See [godoc](https://pkg.go.dev/github.com/go-i2p/go-i2p-bt) or [bttools](https://github.com/go-i2p/bttools).
 
@@ -57,7 +110,7 @@ import (
 	"time"
 
 	"github.com/go-i2p/go-i2p-bt/downloader"
-	blockdownload "github.com/go-i2p/go-i2p-bt/downloadhandler"
+	"github.com/go-i2p/go-i2p-bt/downloadhandler"
 	"github.com/go-i2p/go-i2p-bt/metainfo"
 	pp "github.com/go-i2p/go-i2p-bt/peerprotocol"
 	"github.com/go-i2p/go-i2p-bt/tracker"
@@ -161,7 +214,7 @@ func downloadFileFromPeer(peer string, id, infohash metainfo.Hash, dm *downloadM
 	}
 
 	info := dm.writer.Info()
-	bdh := blockdownload.NewBlockDownloadHandler(info, dm.OnBlock, dm.RequestBlock)
+	bdh := downloadhandler.NewBlockDownloadHandler(info, dm.OnBlock, dm.RequestBlock)
 	if err = bdh.OnHandShake(pc); err != nil {
 		log.Printf("handshake error with '%s': %s", peer, err)
 		return

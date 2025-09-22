@@ -96,15 +96,32 @@ func (tm *transactionManager) Start(s *Server, interval time.Duration) {
 		case <-tm.exit:
 			return
 		case now := <-tick.C:
-			tm.lock.Lock()
-			for k, t := range tm.trans {
-				if now.Sub(t.Time) > interval {
-					delete(tm.trans, k)
-					t.OnTimeout(t)
-				}
-			}
-			tm.lock.Unlock()
+			tm.cleanupExpiredTransactions(now, interval)
 		}
+	}
+}
+
+// cleanupExpiredTransactions removes expired transactions and triggers their timeout handlers.
+func (tm *transactionManager) cleanupExpiredTransactions(now time.Time, interval time.Duration) {
+	tm.lock.Lock()
+	defer tm.lock.Unlock()
+	for k, t := range tm.trans {
+		if tm.isTransactionExpired(t, now, interval) {
+			delete(tm.trans, k)
+			tm.handleTransactionTimeout(t)
+		}
+	}
+}
+
+// isTransactionExpired checks if a transaction has expired based on the interval.
+func (tm *transactionManager) isTransactionExpired(t *transaction, now time.Time, interval time.Duration) bool {
+	return now.Sub(t.Time) > interval
+}
+
+// handleTransactionTimeout calls the OnTimeout handler for a transaction.
+func (tm *transactionManager) handleTransactionTimeout(t *transaction) {
+	if t.OnTimeout != nil {
+		t.OnTimeout(t)
 	}
 }
 
