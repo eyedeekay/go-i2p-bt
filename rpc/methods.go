@@ -1011,84 +1011,10 @@ func (m *RPCMethods) SessionStats() (map[string]interface{}, error) {
 
 // convertTorrentStateToTorrent converts internal TorrentState to Transmission Torrent format
 func (m *RPCMethods) convertTorrentStateToTorrent(state *TorrentState) Torrent {
-	var files []File
-	var fileStats []FileStat
-	var priorities []int64
-	var wanted []bool
-
-	// Convert files
-	for i, f := range state.Files {
-		files = append(files, File{
-			BytesCompleted: f.BytesCompleted,
-			Length:         f.Length,
-			Name:           f.Name,
-		})
-
-		fileStats = append(fileStats, FileStat{
-			BytesCompleted: f.BytesCompleted,
-			Wanted:         f.Wanted,
-			Priority:       f.Priority,
-		})
-
-		if i < len(state.Priorities) {
-			priorities = append(priorities, state.Priorities[i])
-		}
-		if i < len(state.Wanted) {
-			wanted = append(wanted, state.Wanted[i])
-		}
-	}
-
-	// Convert peers
-	var peers []Peer
-	for _, p := range state.Peers {
-		peers = append(peers, Peer{
-			Address:      p.Address,
-			Port:         p.Port,
-			ClientName:   "Unknown",
-			IsIncoming:   p.Direction == "incoming",
-			RateToClient: 0, // Would need to track transfer rates
-			RateToPeer:   0,
-		})
-	}
-
-	// Convert trackers
-	var trackers []Tracker
-	var trackerStats []TrackerStat
-	for i, announce := range state.TrackerList {
-		trackers = append(trackers, Tracker{
-			Announce: announce,
-			ID:       int64(i),
-			Tier:     int64(i), // Simplified
-		})
-
-		trackerStats = append(trackerStats, TrackerStat{
-			Announce:              announce,
-			ID:                    int64(i),
-			Tier:                  int64(i),
-			LastAnnounceSucceeded: false, // Would track actual status
-			AnnounceState:         0,     // Would track actual state
-		})
-	}
-
-	// Calculate progress
-	var totalSize int64
-	var completed int64
-	for _, f := range files {
-		totalSize += f.Length
-		completed += f.BytesCompleted
-	}
-
-	var percentDone float64
-	if totalSize > 0 {
-		percentDone = float64(completed) / float64(totalSize)
-	}
-
-	// Create magnet link
-	magnetLink := ""
-	if state.MetaInfo != nil {
-		magnet := state.MetaInfo.Magnet("", state.InfoHash)
-		magnetLink = magnet.String()
-	}
+	files, fileStats, priorities, wanted := m.convertFileInformation(state)
+	peers := m.convertPeerInformation(state)
+	trackers, trackerStats := m.convertTrackerInformation(state)
+	totalSize, completed, percentDone, magnetLink := m.calculateProgressAndMagnet(state, files)
 
 	return Torrent{
 		ID:                      state.ID,
@@ -1128,6 +1054,106 @@ func (m *RPCMethods) convertTorrentStateToTorrent(state *TorrentState) Torrent {
 		MetadataPercentComplete: getMetadataProgress(state),
 		BandwidthPriority:       0, // Default priority
 	}
+}
+
+// convertFileInformation converts file arrays from TorrentState to Transmission format.
+// This function processes file data, statistics, priorities, and wanted status arrays
+// for use in torrent-get responses and file management operations.
+func (m *RPCMethods) convertFileInformation(state *TorrentState) ([]File, []FileStat, []int64, []bool) {
+	var files []File
+	var fileStats []FileStat
+	var priorities []int64
+	var wanted []bool
+
+	for i, f := range state.Files {
+		files = append(files, File{
+			BytesCompleted: f.BytesCompleted,
+			Length:         f.Length,
+			Name:           f.Name,
+		})
+
+		fileStats = append(fileStats, FileStat{
+			BytesCompleted: f.BytesCompleted,
+			Wanted:         f.Wanted,
+			Priority:       f.Priority,
+		})
+
+		if i < len(state.Priorities) {
+			priorities = append(priorities, state.Priorities[i])
+		}
+		if i < len(state.Wanted) {
+			wanted = append(wanted, state.Wanted[i])
+		}
+	}
+
+	return files, fileStats, priorities, wanted
+}
+
+// convertPeerInformation converts peer data from TorrentState to Transmission Peer format.
+// This function transforms internal peer connection data for torrent-get responses,
+// including address information, connection direction, and transfer rate placeholders.
+func (m *RPCMethods) convertPeerInformation(state *TorrentState) []Peer {
+	var peers []Peer
+	for _, p := range state.Peers {
+		peers = append(peers, Peer{
+			Address:      p.Address,
+			Port:         p.Port,
+			ClientName:   "Unknown",
+			IsIncoming:   p.Direction == "incoming",
+			RateToClient: 0, // Would need to track transfer rates
+			RateToPeer:   0,
+		})
+	}
+	return peers
+}
+
+// convertTrackerInformation converts tracker lists from TorrentState to Transmission format.
+// This function processes tracker announce URLs into both Tracker and TrackerStat arrays
+// for comprehensive tracker information in torrent-get responses.
+func (m *RPCMethods) convertTrackerInformation(state *TorrentState) ([]Tracker, []TrackerStat) {
+	var trackers []Tracker
+	var trackerStats []TrackerStat
+	for i, announce := range state.TrackerList {
+		trackers = append(trackers, Tracker{
+			Announce: announce,
+			ID:       int64(i),
+			Tier:     int64(i), // Simplified
+		})
+
+		trackerStats = append(trackerStats, TrackerStat{
+			Announce:              announce,
+			ID:                    int64(i),
+			Tier:                  int64(i),
+			LastAnnounceSucceeded: false, // Would track actual status
+			AnnounceState:         0,     // Would track actual state
+		})
+	}
+	return trackers, trackerStats
+}
+
+// calculateProgressAndMagnet calculates torrent completion progress and generates magnet link.
+// This function computes total size, completed bytes, percentage done, and creates
+// magnet URI for torrent sharing and progress reporting functionality.
+func (m *RPCMethods) calculateProgressAndMagnet(state *TorrentState, files []File) (int64, int64, float64, string) {
+	var totalSize int64
+	var completed int64
+	for _, f := range files {
+		totalSize += f.Length
+		completed += f.BytesCompleted
+	}
+
+	var percentDone float64
+	if totalSize > 0 {
+		percentDone = float64(completed) / float64(totalSize)
+	}
+
+	magnetLink := ""
+	if state.MetaInfo != nil {
+		magnet := state.MetaInfo.Magnet("", state.InfoHash)
+		magnetLink = magnet.String()
+	}
+
+	return totalSize, completed, percentDone, magnetLink
 }
 
 // filterTorrentFields filters torrent fields based on requested fields
