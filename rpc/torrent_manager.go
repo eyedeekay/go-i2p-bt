@@ -1234,44 +1234,54 @@ func (tm *TorrentManager) readPieceFromFiles(torrent *TorrentState, piece metain
 		filePath := filepath.Join(torrentDir, file.Path(info))
 		fileSize := file.Length
 
-		// Check if this file contributes to the current piece
-		if currentOffset+fileSize <= pieceOffset {
-			// File is entirely before this piece
+		if tm.shouldSkipFile(currentOffset, fileSize, pieceOffset, pieceLength) {
 			currentOffset += fileSize
 			continue
 		}
 
-		if currentOffset >= pieceOffset+pieceLength {
-			// File is entirely after this piece
+		if tm.isFileAfterPiece(currentOffset, pieceOffset, pieceLength) {
 			break
 		}
 
-		// This file contributes to the piece
-		fileStartInPiece := int64(0)
-		if currentOffset < pieceOffset {
-			fileStartInPiece = pieceOffset - currentOffset
-		}
+		fileStartInPiece, readLength := tm.calculateReadParameters(currentOffset, fileSize, pieceOffset, pieceLength)
 
-		readStart := currentOffset + fileStartInPiece
-		readLength := fileSize - fileStartInPiece
-		if readStart+readLength > pieceOffset+pieceLength {
-			readLength = pieceOffset + pieceLength - readStart
-		}
-
-		// Try to read from the file
 		fileData, err := tm.readFileSegment(filePath, fileStartInPiece, readLength)
 		if err != nil {
-			// File doesn't exist or can't be read - piece is incomplete
 			return nil, err
 		}
 
-		// Copy data to piece buffer
 		copy(pieceData[piecePos:], fileData)
 		piecePos += readLength
 		currentOffset += fileSize
 	}
 
 	return pieceData[:piecePos], nil
+}
+
+// shouldSkipFile determines if a file is entirely before the piece and should be skipped
+func (tm *TorrentManager) shouldSkipFile(currentOffset, fileSize, pieceOffset, pieceLength int64) bool {
+	return currentOffset+fileSize <= pieceOffset
+}
+
+// isFileAfterPiece determines if a file is entirely after the piece
+func (tm *TorrentManager) isFileAfterPiece(currentOffset, pieceOffset, pieceLength int64) bool {
+	return currentOffset >= pieceOffset+pieceLength
+}
+
+// calculateReadParameters calculates the file start position and read length for a piece
+func (tm *TorrentManager) calculateReadParameters(currentOffset, fileSize, pieceOffset, pieceLength int64) (fileStartInPiece, readLength int64) {
+	fileStartInPiece = int64(0)
+	if currentOffset < pieceOffset {
+		fileStartInPiece = pieceOffset - currentOffset
+	}
+
+	readStart := currentOffset + fileStartInPiece
+	readLength = fileSize - fileStartInPiece
+	if readStart+readLength > pieceOffset+pieceLength {
+		readLength = pieceOffset + pieceLength - readStart
+	}
+
+	return fileStartInPiece, readLength
 }
 
 // readFileSegment reads a segment of a file
