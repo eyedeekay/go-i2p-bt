@@ -848,7 +848,14 @@ func (tm *TorrentManager) updateStats() {
 // updateTorrentStatistics calculates and updates statistics for a single torrent
 // Implements real-time transfer rate calculations, completion percentage, ETA, and peer counts
 func (tm *TorrentManager) updateTorrentStatistics(torrent *TorrentState, now time.Time) {
-	// Calculate transfer rates based on bytes transferred since last update
+	tm.updateTransferRates(torrent, now)
+	tm.updateTrackingFields(torrent, now)
+	tm.updateCompletionStatistics(torrent)
+	tm.updatePeerStatistics(torrent)
+}
+
+// updateTransferRates calculates download and upload rates based on bytes transferred since last update
+func (tm *TorrentManager) updateTransferRates(torrent *TorrentState, now time.Time) {
 	if !torrent.lastStatsUpdate.IsZero() {
 		timeDelta := now.Sub(torrent.lastStatsUpdate).Seconds()
 		if timeDelta > 0 {
@@ -859,13 +866,17 @@ func (tm *TorrentManager) updateTorrentStatistics(torrent *TorrentState, now tim
 			torrent.UploadRate = int64(float64(uploadDelta) / timeDelta)
 		}
 	}
+}
 
-	// Update tracking fields for next calculation
+// updateTrackingFields updates the tracking fields used for next statistics calculation
+func (tm *TorrentManager) updateTrackingFields(torrent *TorrentState, now time.Time) {
 	torrent.lastStatsUpdate = now
 	torrent.lastDownloaded = torrent.Downloaded
 	torrent.lastUploaded = torrent.Uploaded
+}
 
-	// Calculate completion percentage and piece statistics
+// updateCompletionStatistics calculates completion percentage, remaining bytes, and piece statistics
+func (tm *TorrentManager) updateCompletionStatistics(torrent *TorrentState) {
 	if torrent.MetaInfo != nil {
 		info, err := torrent.MetaInfo.Info()
 		if err == nil {
@@ -887,11 +898,11 @@ func (tm *TorrentManager) updateTorrentStatistics(torrent *TorrentState, now tim
 			torrent.PiecesAvailable = tm.calculateAvailablePieces(torrent)
 		}
 	}
+}
 
-	// Calculate ETA (Estimated Time to Arrival)
+// updatePeerStatistics calculates ETA and updates all peer-related statistics
+func (tm *TorrentManager) updatePeerStatistics(torrent *TorrentState) {
 	torrent.ETA = tm.calculateETA(torrent)
-
-	// Update peer statistics
 	torrent.PeerCount = int64(len(torrent.Peers))
 	torrent.PeerConnectedCount = tm.countConnectedPeers(torrent)
 	torrent.PeerSendingCount = tm.countSendingPeers(torrent)
