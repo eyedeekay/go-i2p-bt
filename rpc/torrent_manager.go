@@ -257,53 +257,107 @@ func (tm *TorrentManager) AddTorrent(req TorrentAddRequest) (*TorrentState, erro
 	defer tm.mu.Unlock()
 
 	// Check torrent limit
-	if len(tm.torrents) >= tm.config.MaxTorrents {
-		return nil, fmt.Errorf("maximum number of torrents (%d) reached", tm.config.MaxTorrents)
+	if err := tm.validateTorrentLimit(); err != nil {
+		return nil, err
 	}
 
-	var metaInfo *metainfo.MetaInfo
-	var infoHash metainfo.Hash
-
-	// Parse torrent data
-	if req.Metainfo != "" {
-		// Decode base64 encoded .torrent file
-		torrentData, err := base64.StdEncoding.DecodeString(req.Metainfo)
-		if err != nil {
-			return nil, fmt.Errorf("failed to decode torrent data: %w", err)
-		}
-
-		// Parse .torrent file
-		err = bencode.DecodeBytes(torrentData, &metaInfo)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse torrent file: %w", err)
-		}
-
-		infoHash = metaInfo.InfoHash()
-
-	} else if req.Filename != "" {
-		// Parse magnet URI
-		magnet, err := metainfo.ParseMagnetURI(req.Filename)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse magnet URI: %w", err)
-		}
-
-		infoHash = magnet.InfoHash
-
-		// For magnet links, we need to download the metadata
-		// This will be handled asynchronously
-
-	} else {
-		return nil, fmt.Errorf("either metainfo or filename (magnet URI) must be provided")
+	// Parse torrent data to get metainfo and info hash
+	metaInfo, infoHash, err := tm.parseAddTorrentRequest(req)
+	if err != nil {
+		return nil, err
 	}
 
 	// Check for duplicate torrents
-	for _, existing := range tm.torrents {
-		if existing.InfoHash == infoHash {
-			return existing, fmt.Errorf("torrent already exists")
+	if existing := tm.findDuplicateTorrent(infoHash); existing != nil {
+		return existing, fmt.Errorf("torrent already exists")
+	}
+
+	// Create and initialize torrent state
+	torrentState := tm.createTorrentState(req, metaInfo, infoHash)
+
+	// Set initial status based on request and metadata availability
+	tm.setInitialTorrentStatus(torrentState, req.Paused, metaInfo != nil)
+
+	// Initialize file information if we have metadata
+	if metaInfo != nil {
+		if err := tm.initializeFileInfo(torrentState, metaInfo); err != nil {
+			tm.log("Failed to initialize file info for torrent %s: %v", infoHash.HexString(), err)
 		}
 	}
 
-	// Create torrent state
+	// Store torrent
+	tm.torrents[torrentState.ID] = torrentState
+
+	// Start download process if appropriate
+	tm.handleTorrentStartup(torrentState, req.Paused, metaInfo != nil)
+
+	atomic.AddInt64(&tm.stats.TorrentsAdded, 1)
+
+	return torrentState, nil
+}
+
+// validateTorrentLimit checks if adding a new torrent would exceed the maximum limit
+func (tm *TorrentManager) validateTorrentLimit() error {
+	if len(tm.torrents) >= tm.config.MaxTorrents {
+		return fmt.Errorf("maximum number of torrents (%d) reached", tm.config.MaxTorrents)
+	}
+	return nil
+}
+
+// parseAddTorrentRequest parses the torrent request and returns metainfo and info hash
+func (tm *TorrentManager) parseAddTorrentRequest(req TorrentAddRequest) (*metainfo.MetaInfo, metainfo.Hash, error) {
+	if req.Metainfo != "" {
+		return tm.parseMetainfoData(req.Metainfo)
+	} else if req.Filename != "" {
+		return tm.parseMagnetURI(req.Filename)
+	} else {
+		return nil, metainfo.Hash{}, fmt.Errorf("either metainfo or filename (magnet URI) must be provided")
+	}
+}
+
+// parseMetainfoData decodes and parses base64 encoded .torrent file data
+func (tm *TorrentManager) parseMetainfoData(metainfoData string) (*metainfo.MetaInfo, metainfo.Hash, error) {
+	// Decode base64 encoded .torrent file
+	torrentData, err := base64.StdEncoding.DecodeString(metainfoData)
+	if err != nil {
+		return nil, metainfo.Hash{}, fmt.Errorf("failed to decode torrent data: %w", err)
+	}
+
+	// Parse .torrent file
+	var metaInfo metainfo.MetaInfo
+	err = bencode.DecodeBytes(torrentData, &metaInfo)
+	if err != nil {
+		return nil, metainfo.Hash{}, fmt.Errorf("failed to parse torrent file: %w", err)
+	}
+
+	infoHash := metaInfo.InfoHash()
+	return &metaInfo, infoHash, nil
+}
+
+// parseMagnetURI parses a magnet URI and returns the info hash
+func (tm *TorrentManager) parseMagnetURI(magnetURI string) (*metainfo.MetaInfo, metainfo.Hash, error) {
+	// Parse magnet URI
+	magnet, err := metainfo.ParseMagnetURI(magnetURI)
+	if err != nil {
+		return nil, metainfo.Hash{}, fmt.Errorf("failed to parse magnet URI: %w", err)
+	}
+
+	// For magnet links, we need to download the metadata asynchronously
+	return nil, magnet.InfoHash, nil
+}
+
+// findDuplicateTorrent finds an existing torrent with the given info hash
+func (tm *TorrentManager) findDuplicateTorrent(infoHash metainfo.Hash) *TorrentState {
+	for _, existing := range tm.torrents {
+		if existing.InfoHash == infoHash {
+			return existing
+		}
+	}
+	return nil
+}
+
+// createTorrentState creates a new TorrentState with basic initialization
+func (tm *TorrentManager) createTorrentState(req TorrentAddRequest, metaInfo *metainfo.MetaInfo, infoHash metainfo.Hash) *TorrentState {
 	torrentID := tm.nextID
 	tm.nextID++
 
@@ -312,7 +366,7 @@ func (tm *TorrentManager) AddTorrent(req TorrentAddRequest) (*TorrentState, erro
 		downloadDir = tm.sessionConfig.DownloadDir
 	}
 
-	torrentState := &TorrentState{
+	return &TorrentState{
 		ID:                  torrentID,
 		InfoHash:            infoHash,
 		MetaInfo:            metaInfo,
@@ -325,60 +379,74 @@ func (tm *TorrentManager) AddTorrent(req TorrentAddRequest) (*TorrentState, erro
 		Peers:               []PeerInfo{},
 		HonorsSessionLimits: true,
 	}
+}
 
-	// Set initial status
-	if req.Paused {
+// setInitialTorrentStatus sets the initial status of a torrent based on pause state and metadata availability
+func (tm *TorrentManager) setInitialTorrentStatus(torrentState *TorrentState, paused bool, hasMetadata bool) {
+	if paused {
 		torrentState.Status = TorrentStatusStopped
 	} else {
-		if metaInfo != nil {
+		if hasMetadata {
 			torrentState.Status = TorrentStatusDownloading
 		} else {
 			torrentState.Status = TorrentStatusQueuedVerify // Downloading metadata
 		}
 	}
+}
 
-	// Initialize file information if we have metadata
-	if metaInfo != nil {
-		info, err := metaInfo.Info()
-		if err == nil {
-			torrentState.Files = make([]FileInfo, len(info.Files))
-			torrentState.Priorities = make([]int64, len(info.Files))
-			torrentState.Wanted = make([]bool, len(info.Files))
+// initializeFileInfo initializes file information, priorities, and tracker list when metadata is available
+func (tm *TorrentManager) initializeFileInfo(torrentState *TorrentState, metaInfo *metainfo.MetaInfo) error {
+	info, err := metaInfo.Info()
+	if err != nil {
+		return err
+	}
 
-			for i, file := range info.Files {
-				torrentState.Files[i] = FileInfo{
-					Name:           file.Path(info),
-					Length:         file.Length,
-					BytesCompleted: 0,
-					Priority:       0, // Normal priority
-					Wanted:         true,
-				}
-				torrentState.Priorities[i] = 0
-				torrentState.Wanted[i] = true
-			}
+	tm.setupFileArrays(torrentState, info)
+	tm.populateFileInfo(torrentState, info)
+	tm.extractTrackerList(torrentState, metaInfo)
 
-			// Get tracker list
-			announces := metaInfo.Announces()
-			for _, tierList := range announces {
-				torrentState.TrackerList = append(torrentState.TrackerList, tierList...)
-			}
+	return nil
+}
+
+// setupFileArrays initializes the file-related arrays in the torrent state
+func (tm *TorrentManager) setupFileArrays(torrentState *TorrentState, info metainfo.Info) {
+	fileCount := len(info.Files)
+	torrentState.Files = make([]FileInfo, fileCount)
+	torrentState.Priorities = make([]int64, fileCount)
+	torrentState.Wanted = make([]bool, fileCount)
+}
+
+// populateFileInfo populates file information for each file in the torrent
+func (tm *TorrentManager) populateFileInfo(torrentState *TorrentState, info metainfo.Info) {
+	for i, file := range info.Files {
+		torrentState.Files[i] = FileInfo{
+			Name:           file.Path(info),
+			Length:         file.Length,
+			BytesCompleted: 0,
+			Priority:       0, // Normal priority
+			Wanted:         true,
 		}
+		torrentState.Priorities[i] = 0
+		torrentState.Wanted[i] = true
 	}
+}
 
-	// Store torrent
-	tm.torrents[torrentID] = torrentState
+// extractTrackerList extracts and flattens the tracker list from metainfo announces
+func (tm *TorrentManager) extractTrackerList(torrentState *TorrentState, metaInfo *metainfo.MetaInfo) {
+	announces := metaInfo.Announces()
+	for _, tierList := range announces {
+		torrentState.TrackerList = append(torrentState.TrackerList, tierList...)
+	}
+}
 
-	// Start download if not paused
-	if !req.Paused && tm.sessionConfig.StartAddedTorrents {
+// handleTorrentStartup handles the startup process for a newly added torrent
+func (tm *TorrentManager) handleTorrentStartup(torrentState *TorrentState, paused bool, hasMetadata bool) {
+	if !paused && tm.sessionConfig.StartAddedTorrents {
 		go tm.startTorrent(torrentState)
-	} else if metaInfo != nil {
+	} else if hasMetadata {
 		// Even if paused, verify existing data
-		go tm.VerifyTorrent(torrentID)
+		go tm.VerifyTorrent(torrentState.ID)
 	}
-
-	atomic.AddInt64(&tm.stats.TorrentsAdded, 1)
-
-	return torrentState, nil
 }
 
 // GetTorrent retrieves torrent information by ID

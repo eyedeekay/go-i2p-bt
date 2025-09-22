@@ -561,8 +561,28 @@ func (m *RPCMethods) updateFilePriorities(torrent *TorrentState, req TorrentActi
 // Returns:
 //   - error: validation or bounds checking error, nil on success
 func (m *RPCMethods) updateTrackers(torrent *TorrentState, req TorrentActionRequest) error {
-	// Add new trackers with duplicate checking
-	for _, tracker := range req.TrackerAdd {
+	// Process tracker additions
+	if err := m.addTrackersWithDuplicateCheck(torrent, req.TrackerAdd); err != nil {
+		return err
+	}
+
+	// Process tracker removals
+	if err := m.removeTrackersWithBoundsCheck(torrent, req.TrackerRemove); err != nil {
+		return err
+	}
+
+	// Process tracker replacements
+	if err := m.replaceTrackerWithValidation(torrent, req.TrackerReplace); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// addTrackersWithDuplicateCheck adds new tracker URLs while checking for duplicates.
+// This function validates tracker URLs and prevents duplicate entries in the tracker list.
+func (m *RPCMethods) addTrackersWithDuplicateCheck(torrent *TorrentState, trackersToAdd []string) error {
+	for _, tracker := range trackersToAdd {
 		if strings.TrimSpace(tracker) == "" {
 			continue // Skip empty trackers
 		}
@@ -579,70 +599,103 @@ func (m *RPCMethods) updateTrackers(torrent *TorrentState, req TorrentActionRequ
 			torrent.TrackerList = append(torrent.TrackerList, tracker)
 		}
 	}
+	return nil
+}
 
-	// Remove trackers by index with bounds checking
-	if len(req.TrackerRemove) > 0 {
-		// Sort indices in descending order to remove from end first
-		indices := make([]int, len(req.TrackerRemove))
-		for i, idx := range req.TrackerRemove {
-			if idx < 0 || int(idx) >= len(torrent.TrackerList) {
-				return fmt.Errorf("trackerRemove index %d out of bounds (0-%d)", idx, len(torrent.TrackerList)-1)
-			}
-			indices[i] = int(idx)
-		}
-
-		// Simple descending sort (avoiding external dependencies)
-		for i := 0; i < len(indices); i++ {
-			for j := i + 1; j < len(indices); j++ {
-				if indices[i] < indices[j] {
-					indices[i], indices[j] = indices[j], indices[i]
-				}
-			}
-		}
-
-		// Remove trackers from highest index to lowest
-		for _, index := range indices {
-			torrent.TrackerList = append(torrent.TrackerList[:index], torrent.TrackerList[index+1:]...)
-		}
+// removeTrackersWithBoundsCheck removes trackers by index with comprehensive bounds checking.
+// This function validates all indices before removal and sorts them in descending order
+// to ensure safe removal from highest to lowest index.
+func (m *RPCMethods) removeTrackersWithBoundsCheck(torrent *TorrentState, indicesToRemove []int64) error {
+	if len(indicesToRemove) == 0 {
+		return nil
 	}
 
-	// Handle tracker replacement
-	if len(req.TrackerReplace) == 2 {
-		// Extract and validate tracker replacement parameters
-		var oldID int
-		var newURL string
-
-		// Handle different JSON number types
-		switch v := req.TrackerReplace[0].(type) {
-		case float64:
-			oldID = int(v)
-		case int:
-			oldID = v
-		case int64:
-			oldID = int(v)
-		default:
-			return fmt.Errorf("trackerReplace[0] must be a number, got %T", v)
+	// Validate all indices and convert to int slice
+	indices := make([]int, len(indicesToRemove))
+	for i, idx := range indicesToRemove {
+		if idx < 0 || int(idx) >= len(torrent.TrackerList) {
+			return fmt.Errorf("trackerRemove index %d out of bounds (0-%d)", idx, len(torrent.TrackerList)-1)
 		}
+		indices[i] = int(idx)
+	}
 
-		if url, ok := req.TrackerReplace[1].(string); ok {
-			newURL = url
-		} else {
-			return fmt.Errorf("trackerReplace[1] must be a string, got %T", req.TrackerReplace[1])
-		}
+	// Sort indices in descending order using bubble sort to avoid external dependencies
+	m.sortIndicesDescending(indices)
 
-		// Validate index and replace
-		if oldID < 0 || oldID >= len(torrent.TrackerList) {
-			return fmt.Errorf("trackerReplace index %d out of bounds (0-%d)", oldID, len(torrent.TrackerList)-1)
-		}
-
-		if strings.TrimSpace(newURL) == "" {
-			return fmt.Errorf("trackerReplace URL cannot be empty")
-		}
-
-		torrent.TrackerList[oldID] = newURL
+	// Remove trackers from highest index to lowest
+	for _, index := range indices {
+		torrent.TrackerList = append(torrent.TrackerList[:index], torrent.TrackerList[index+1:]...)
 	}
 
 	return nil
+}
+
+// sortIndicesDescending sorts a slice of integers in descending order using bubble sort.
+// This function avoids external dependencies while providing the needed sorting capability.
+func (m *RPCMethods) sortIndicesDescending(indices []int) {
+	for i := 0; i < len(indices); i++ {
+		for j := i + 1; j < len(indices); j++ {
+			if indices[i] < indices[j] {
+				indices[i], indices[j] = indices[j], indices[i]
+			}
+		}
+	}
+}
+
+// replaceTrackerWithValidation handles tracker replacement with type checking and validation.
+// This function validates the replacement parameters, checks bounds, and performs the replacement.
+func (m *RPCMethods) replaceTrackerWithValidation(torrent *TorrentState, trackerReplace []interface{}) error {
+	if len(trackerReplace) != 2 {
+		return nil // No replacement requested
+	}
+
+	// Extract and validate parameters
+	oldID, newURL, err := m.extractReplacementParameters(trackerReplace)
+	if err != nil {
+		return err
+	}
+
+	// Validate index bounds
+	if oldID < 0 || oldID >= len(torrent.TrackerList) {
+		return fmt.Errorf("trackerReplace index %d out of bounds (0-%d)", oldID, len(torrent.TrackerList)-1)
+	}
+
+	// Validate new URL
+	if strings.TrimSpace(newURL) == "" {
+		return fmt.Errorf("trackerReplace URL cannot be empty")
+	}
+
+	// Perform replacement
+	torrent.TrackerList[oldID] = newURL
+	return nil
+}
+
+// extractReplacementParameters extracts and validates tracker replacement parameters.
+// This function handles type checking for JSON number types and string validation.
+func (m *RPCMethods) extractReplacementParameters(trackerReplace []interface{}) (int, string, error) {
+	var oldID int
+	var newURL string
+
+	// Handle different JSON number types for the index
+	switch v := trackerReplace[0].(type) {
+	case float64:
+		oldID = int(v)
+	case int:
+		oldID = v
+	case int64:
+		oldID = int(v)
+	default:
+		return 0, "", fmt.Errorf("trackerReplace[0] must be a number, got %T", v)
+	}
+
+	// Validate URL parameter type
+	if url, ok := trackerReplace[1].(string); ok {
+		newURL = url
+	} else {
+		return 0, "", fmt.Errorf("trackerReplace[1] must be a string, got %T", trackerReplace[1])
+	}
+
+	return oldID, newURL, nil
 }
 
 // updateTorrentLocation handles download location changes with validation and move support.
