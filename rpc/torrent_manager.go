@@ -418,7 +418,7 @@ func (tm *TorrentManager) createTorrentState(req TorrentAddRequest, metaInfo *me
 }
 
 // setInitialTorrentStatus sets the initial status of a torrent based on pause state and metadata availability
-func (tm *TorrentManager) setInitialTorrentStatus(torrentState *TorrentState, paused bool, hasMetadata bool) {
+func (tm *TorrentManager) setInitialTorrentStatus(torrentState *TorrentState, paused, hasMetadata bool) {
 	if paused {
 		torrentState.Status = TorrentStatusStopped
 	} else {
@@ -476,7 +476,7 @@ func (tm *TorrentManager) extractTrackerList(torrentState *TorrentState, metaInf
 }
 
 // handleTorrentStartup handles the startup process for a newly added torrent
-func (tm *TorrentManager) handleTorrentStartup(torrentState *TorrentState, paused bool, hasMetadata bool) {
+func (tm *TorrentManager) handleTorrentStartup(torrentState *TorrentState, paused, hasMetadata bool) {
 	if !paused && tm.sessionConfig.StartAddedTorrents {
 		go tm.startTorrent(torrentState)
 	} else if hasMetadata {
