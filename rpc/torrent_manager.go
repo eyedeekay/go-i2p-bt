@@ -566,7 +566,7 @@ func (tm *TorrentManager) StartTorrentNow(id int64) error {
 	// Immediately start torrent, bypassing any potential queue logic
 	torrent.Status = TorrentStatusDownloading
 	torrent.StartDate = time.Now()
-	
+
 	// Start torrent immediately without queue delays
 	go tm.startTorrent(torrent)
 

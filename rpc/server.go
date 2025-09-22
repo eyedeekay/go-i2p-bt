@@ -429,7 +429,7 @@ func generateSessionID() string {
 		// This maintains functionality even in edge cases
 		return fmt.Sprintf("fallback-session-%d", time.Now().UnixNano())
 	}
-	
+
 	// Return hex-encoded random session ID
 	return fmt.Sprintf("session-%s", hex.EncodeToString(bytes))
 }
