@@ -757,45 +757,63 @@ func (tm *TorrentManager) handleDownloaderResponse(response downloader.TorrentRe
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 
-	// Find the torrent by info hash
-	var torrent *TorrentState
-	for _, t := range tm.torrents {
-		if t.InfoHash == response.InfoHash {
-			torrent = t
-			break
-		}
-	}
-
+	torrent := tm.findTorrentByInfoHash(response.InfoHash)
 	if torrent == nil {
 		tm.log("Received metadata for unknown torrent: %s", response.InfoHash.HexString())
 		return
 	}
 
-	// Parse the metadata
+	metaInfo, err := tm.parseAndValidateMetadata(response)
+	if err != nil {
+		tm.log("Failed to process metadata for torrent %s: %v", response.InfoHash.HexString(), err)
+		return
+	}
+
+	torrent.MetaInfo = metaInfo
+
+	if err := tm.initializeTorrentFileStructure(torrent, metaInfo); err != nil {
+		tm.log("Failed to initialize file structure for torrent %s: %v", response.InfoHash.HexString(), err)
+		return
+	}
+
+	tm.finalizeTorrentMetadataSetup(torrent)
+}
+
+// findTorrentByInfoHash locates a torrent in the manager by its info hash.
+func (tm *TorrentManager) findTorrentByInfoHash(infoHash metainfo.Hash) *TorrentState {
+	for _, t := range tm.torrents {
+		if t.InfoHash == infoHash {
+			return t
+		}
+	}
+	return nil
+}
+
+// parseAndValidateMetadata parses and validates the metadata from a downloader response.
+func (tm *TorrentManager) parseAndValidateMetadata(response downloader.TorrentResponse) (*metainfo.MetaInfo, error) {
 	var metaInfo metainfo.MetaInfo
 	if err := bencode.DecodeBytes(response.InfoBytes, &metaInfo.InfoBytes); err != nil {
-		tm.log("Failed to parse metadata for torrent %s: %v", response.InfoHash.HexString(), err)
-		return
+		return nil, fmt.Errorf("failed to parse metadata: %w", err)
 	}
 
-	// Verify info hash
 	if sha1.Sum(response.InfoBytes) != [20]byte(response.InfoHash) {
-		tm.log("Invalid metadata for torrent %s: hash mismatch", response.InfoHash.HexString())
-		return
+		return nil, fmt.Errorf("invalid metadata: hash mismatch")
 	}
 
-	torrent.MetaInfo = &metaInfo
+	return &metaInfo, nil
+}
 
-	// Update file information
+// initializeTorrentFileStructure sets up the file arrays and information for a torrent.
+func (tm *TorrentManager) initializeTorrentFileStructure(torrent *TorrentState, metaInfo *metainfo.MetaInfo) error {
 	info, err := metaInfo.Info()
 	if err != nil {
-		tm.log("Failed to parse info for torrent %s: %v", response.InfoHash.HexString(), err)
-		return
+		return fmt.Errorf("failed to parse info: %w", err)
 	}
 
-	torrent.Files = make([]FileInfo, len(info.Files))
-	torrent.Priorities = make([]int64, len(info.Files))
-	torrent.Wanted = make([]bool, len(info.Files))
+	fileCount := len(info.Files)
+	torrent.Files = make([]FileInfo, fileCount)
+	torrent.Priorities = make([]int64, fileCount)
+	torrent.Wanted = make([]bool, fileCount)
 
 	for i, file := range info.Files {
 		torrent.Files[i] = FileInfo{
@@ -809,12 +827,13 @@ func (tm *TorrentManager) handleDownloaderResponse(response downloader.TorrentRe
 		torrent.Wanted[i] = true
 	}
 
-	// Update status and start the download process
+	return nil
+}
+
+// finalizeTorrentMetadataSetup completes the metadata setup and starts the download process.
+func (tm *TorrentManager) finalizeTorrentMetadataSetup(torrent *TorrentState) {
 	torrent.Status = TorrentStatusDownloading
-
-	tm.log("Metadata downloaded for torrent %s, starting file download", response.InfoHash.HexString())
-
-	// Now that we have metadata, start the full download process
+	tm.log("Metadata downloaded for torrent %s, starting file download", torrent.InfoHash.HexString())
 	go tm.startTorrent(torrent)
 }
 
