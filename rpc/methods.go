@@ -1258,100 +1258,119 @@ func getMetadataProgress(state *TorrentState) float64 {
 
 // GetMethodHandler returns a handler function for the given method name
 func (m *RPCMethods) GetMethodHandler(method string) (func(json.RawMessage) (interface{}, error), bool) {
+	// Try torrent action methods first
+	if handler := m.getTorrentActionHandler(method); handler != nil {
+		return handler, true
+	}
+
+	// Try special request handlers
+	if handler := m.getSpecialRequestHandler(method); handler != nil {
+		return handler, true
+	}
+
+	// Try parameter-less session methods
+	if handler := m.getSessionHandler(method); handler != nil {
+		return handler, true
+	}
+
+	return nil, false
+}
+
+// getTorrentActionHandler returns handlers for torrent action methods that use TorrentActionRequest.
+func (m *RPCMethods) getTorrentActionHandler(method string) func(json.RawMessage) (interface{}, error) {
+	var methodFunc func(TorrentActionRequest) error
+
+	switch method {
+	case "torrent-start":
+		methodFunc = m.TorrentStart
+	case "torrent-start-now":
+		methodFunc = m.TorrentStartNow
+	case "torrent-stop":
+		methodFunc = m.TorrentStop
+	case "torrent-verify":
+		methodFunc = m.TorrentVerify
+	case "torrent-remove":
+		methodFunc = m.TorrentRemove
+	case "torrent-set":
+		methodFunc = m.TorrentSet
+	default:
+		return nil
+	}
+
+	return m.createTorrentActionWrapper(methodFunc)
+}
+
+// getSpecialRequestHandler returns handlers for methods with specific request types.
+func (m *RPCMethods) getSpecialRequestHandler(method string) func(json.RawMessage) (interface{}, error) {
 	switch method {
 	case "torrent-add":
-		return func(params json.RawMessage) (interface{}, error) {
-			var req TorrentAddRequest
-			if err := json.Unmarshal(params, &req); err != nil {
-				return nil, &RPCError{Code: ErrCodeInvalidParams, Message: err.Error()}
-			}
-			return m.TorrentAdd(req)
-		}, true
-
+		return m.createTorrentAddWrapper()
 	case "torrent-get":
-		return func(params json.RawMessage) (interface{}, error) {
-			var req TorrentGetRequest
-			if err := json.Unmarshal(params, &req); err != nil {
-				return nil, &RPCError{Code: ErrCodeInvalidParams, Message: err.Error()}
-			}
-			return m.TorrentGet(req)
-		}, true
+		return m.createTorrentGetWrapper()
+	case "session-set":
+		return m.createSessionSetWrapper()
+	default:
+		return nil
+	}
+}
 
-	case "torrent-start":
-		return func(params json.RawMessage) (interface{}, error) {
-			var req TorrentActionRequest
-			if err := json.Unmarshal(params, &req); err != nil {
-				return nil, &RPCError{Code: ErrCodeInvalidParams, Message: err.Error()}
-			}
-			return nil, m.TorrentStart(req)
-		}, true
-
-	case "torrent-start-now":
-		return func(params json.RawMessage) (interface{}, error) {
-			var req TorrentActionRequest
-			if err := json.Unmarshal(params, &req); err != nil {
-				return nil, &RPCError{Code: ErrCodeInvalidParams, Message: err.Error()}
-			}
-			return nil, m.TorrentStartNow(req)
-		}, true
-
-	case "torrent-stop":
-		return func(params json.RawMessage) (interface{}, error) {
-			var req TorrentActionRequest
-			if err := json.Unmarshal(params, &req); err != nil {
-				return nil, &RPCError{Code: ErrCodeInvalidParams, Message: err.Error()}
-			}
-			return nil, m.TorrentStop(req)
-		}, true
-
-	case "torrent-verify":
-		return func(params json.RawMessage) (interface{}, error) {
-			var req TorrentActionRequest
-			if err := json.Unmarshal(params, &req); err != nil {
-				return nil, &RPCError{Code: ErrCodeInvalidParams, Message: err.Error()}
-			}
-			return nil, m.TorrentVerify(req)
-		}, true
-
-	case "torrent-remove":
-		return func(params json.RawMessage) (interface{}, error) {
-			var req TorrentActionRequest
-			if err := json.Unmarshal(params, &req); err != nil {
-				return nil, &RPCError{Code: ErrCodeInvalidParams, Message: err.Error()}
-			}
-			return nil, m.TorrentRemove(req)
-		}, true
-
-	case "torrent-set":
-		return func(params json.RawMessage) (interface{}, error) {
-			var req TorrentActionRequest
-			if err := json.Unmarshal(params, &req); err != nil {
-				return nil, &RPCError{Code: ErrCodeInvalidParams, Message: err.Error()}
-			}
-			return nil, m.TorrentSet(req)
-		}, true
-
+// getSessionHandler returns handlers for parameter-less session methods.
+func (m *RPCMethods) getSessionHandler(method string) func(json.RawMessage) (interface{}, error) {
+	switch method {
 	case "session-get":
 		return func(params json.RawMessage) (interface{}, error) {
 			return m.SessionGet()
-		}, true
-
-	case "session-set":
-		return func(params json.RawMessage) (interface{}, error) {
-			var req SessionSetRequest
-			if err := json.Unmarshal(params, &req); err != nil {
-				return nil, &RPCError{Code: ErrCodeInvalidParams, Message: err.Error()}
-			}
-			return nil, m.SessionSet(req)
-		}, true
-
+		}
 	case "session-stats":
 		return func(params json.RawMessage) (interface{}, error) {
 			return m.SessionStats()
-		}, true
-
+		}
 	default:
-		return nil, false
+		return nil
+	}
+}
+
+// createTorrentActionWrapper creates a wrapper function for torrent action methods.
+func (m *RPCMethods) createTorrentActionWrapper(methodFunc func(TorrentActionRequest) error) func(json.RawMessage) (interface{}, error) {
+	return func(params json.RawMessage) (interface{}, error) {
+		var req TorrentActionRequest
+		if err := json.Unmarshal(params, &req); err != nil {
+			return nil, &RPCError{Code: ErrCodeInvalidParams, Message: err.Error()}
+		}
+		return nil, methodFunc(req)
+	}
+}
+
+// createTorrentAddWrapper creates a wrapper function for the torrent-add method.
+func (m *RPCMethods) createTorrentAddWrapper() func(json.RawMessage) (interface{}, error) {
+	return func(params json.RawMessage) (interface{}, error) {
+		var req TorrentAddRequest
+		if err := json.Unmarshal(params, &req); err != nil {
+			return nil, &RPCError{Code: ErrCodeInvalidParams, Message: err.Error()}
+		}
+		return m.TorrentAdd(req)
+	}
+}
+
+// createTorrentGetWrapper creates a wrapper function for the torrent-get method.
+func (m *RPCMethods) createTorrentGetWrapper() func(json.RawMessage) (interface{}, error) {
+	return func(params json.RawMessage) (interface{}, error) {
+		var req TorrentGetRequest
+		if err := json.Unmarshal(params, &req); err != nil {
+			return nil, &RPCError{Code: ErrCodeInvalidParams, Message: err.Error()}
+		}
+		return m.TorrentGet(req)
+	}
+}
+
+// createSessionSetWrapper creates a wrapper function for the session-set method.
+func (m *RPCMethods) createSessionSetWrapper() func(json.RawMessage) (interface{}, error) {
+	return func(params json.RawMessage) (interface{}, error) {
+		var req SessionSetRequest
+		if err := json.Unmarshal(params, &req); err != nil {
+			return nil, &RPCError{Code: ErrCodeInvalidParams, Message: err.Error()}
+		}
+		return nil, m.SessionSet(req)
 	}
 }
 
