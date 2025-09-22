@@ -139,10 +139,28 @@ func (m *RPCMethods) TorrentStart(req TorrentActionRequest) error {
 }
 
 // TorrentStartNow implements the torrent-start-now RPC method
+// This method bypasses download queue and immediately starts torrents,
+// maintaining compatibility with Transmission RPC specification
 func (m *RPCMethods) TorrentStartNow(req TorrentActionRequest) error {
-	// For simplicity, treat torrent-start-now the same as torrent-start
-	// In a full implementation, this would bypass the queue
-	return m.TorrentStart(req)
+	ids, err := m.manager.ResolveTorrentIDs(req.IDs)
+	if err != nil {
+		return &RPCError{
+			Code:    ErrCodeInvalidArgument,
+			Message: err.Error(),
+		}
+	}
+
+	// Force immediate start bypassing any queue logic
+	for _, id := range ids {
+		if err := m.manager.StartTorrentNow(id); err != nil {
+			return &RPCError{
+				Code:    ErrCodeInternalError,
+				Message: fmt.Sprintf("failed to start torrent immediately %d: %v", id, err),
+			}
+		}
+	}
+
+	return nil
 }
 
 // TorrentStop implements the torrent-stop RPC method

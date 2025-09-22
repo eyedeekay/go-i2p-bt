@@ -547,6 +547,32 @@ func (tm *TorrentManager) StartTorrent(id int64) error {
 	return nil
 }
 
+// StartTorrentNow starts downloading/seeding a torrent immediately, bypassing any queue
+// This implements the "torrent-start-now" RPC method which should bypass download queues
+func (tm *TorrentManager) StartTorrentNow(id int64) error {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+
+	torrent, exists := tm.torrents[id]
+	if !exists {
+		return fmt.Errorf("torrent with ID %d not found", id)
+	}
+
+	// Force immediate start regardless of current status (except if already active)
+	if torrent.Status == TorrentStatusDownloading || torrent.Status == TorrentStatusSeeding {
+		return nil // Already started
+	}
+
+	// Immediately start torrent, bypassing any potential queue logic
+	torrent.Status = TorrentStatusDownloading
+	torrent.StartDate = time.Now()
+	
+	// Start torrent immediately without queue delays
+	go tm.startTorrent(torrent)
+
+	return nil
+}
+
 // StopTorrent stops downloading/seeding a torrent
 func (tm *TorrentManager) StopTorrent(id int64) error {
 	tm.mu.Lock()
