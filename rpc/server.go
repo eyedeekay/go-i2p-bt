@@ -16,6 +16,8 @@ package rpc
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -418,10 +420,18 @@ func (s *Server) Shutdown(ctx context.Context) error {
 
 // Helper functions
 
-// generateSessionID creates a new session identifier
+// generateSessionID creates a new session identifier using cryptographically secure random bytes
 func generateSessionID() string {
-	// Simple session ID generation - in production, use crypto/rand
-	return fmt.Sprintf("session-%d", time.Now().UnixNano())
+	// Generate 16 bytes of random data for session ID
+	bytes := make([]byte, 16)
+	if _, err := rand.Read(bytes); err != nil {
+		// Fallback to time-based ID if crypto/rand fails (highly unlikely)
+		// This maintains functionality even in edge cases
+		return fmt.Sprintf("fallback-session-%d", time.Now().UnixNano())
+	}
+	
+	// Return hex-encoded random session ID
+	return fmt.Sprintf("session-%s", hex.EncodeToString(bytes))
 }
 
 // Middleware support
