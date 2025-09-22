@@ -98,6 +98,38 @@ type TorrentManager struct {
 
 // NewTorrentManager creates a new TorrentManager with the given configuration
 func NewTorrentManager(config TorrentManagerConfig) (*TorrentManager, error) {
+	// Apply default values to configuration
+	applyConfigDefaults(&config)
+
+	// Create base TorrentManager instance
+	ctx, cancel := context.WithCancel(context.Background())
+	tm := &TorrentManager{
+		config:        config,
+		torrents:      make(map[int64]*TorrentState),
+		nextID:        1,
+		sessionConfig: config.SessionConfig,
+		ctx:           ctx,
+		cancel:        cancel,
+		log:           config.ErrorLog,
+	}
+
+	// Initialize DHT server if enabled
+	if err := tm.initializeDHTServer(); err != nil {
+		tm.log("DHT initialization warning: %v", err)
+		// Continue without DHT - not a fatal error
+	}
+
+	// Initialize downloader and DHT integration
+	tm.initializeDownloader()
+
+	// Start background processes
+	tm.startBackgroundProcesses()
+
+	return tm, nil
+}
+
+// applyConfigDefaults sets default values for unspecified configuration options
+func applyConfigDefaults(config *TorrentManagerConfig) {
 	if config.ErrorLog == nil {
 		config.ErrorLog = log.Printf
 	}
@@ -122,88 +154,92 @@ func NewTorrentManager(config TorrentManagerConfig) (*TorrentManager, error) {
 		config.PeerPort = 51413
 	}
 
-	// Set default session configuration
+	// Set default session configuration if not provided
 	if config.SessionConfig.Version == "" {
-		config.SessionConfig = SessionConfiguration{
-			DownloadDir:           config.DownloadDir,
-			PeerPort:              config.PeerPort,
-			PeerLimitGlobal:       config.PeerLimitGlobal,
-			PeerLimitPerTorrent:   config.PeerLimitPerTorrent,
-			DHTEnabled:            true,
-			PEXEnabled:            true,
-			LPDEnabled:            false,
-			UTPEnabled:            true,
-			Encryption:            "preferred",
-			SpeedLimitDown:        100,
-			SpeedLimitDownEnabled: false,
-			SpeedLimitUp:          100,
-			SpeedLimitUpEnabled:   false,
-			SeedRatioLimit:        2.0,
-			SeedRatioLimited:      false,
-			StartAddedTorrents:    true,
-			CacheSizeMB:           4,
-			Version:               "go-i2p-bt/1.0.0",
-		}
+		config.SessionConfig = createDefaultSessionConfig(*config)
+	}
+}
+
+// createDefaultSessionConfig creates a default session configuration with the given base config
+func createDefaultSessionConfig(config TorrentManagerConfig) SessionConfiguration {
+	return SessionConfiguration{
+		DownloadDir:           config.DownloadDir,
+		PeerPort:              config.PeerPort,
+		PeerLimitGlobal:       config.PeerLimitGlobal,
+		PeerLimitPerTorrent:   config.PeerLimitPerTorrent,
+		DHTEnabled:            true,
+		PEXEnabled:            true,
+		LPDEnabled:            false,
+		UTPEnabled:            true,
+		Encryption:            "preferred",
+		SpeedLimitDown:        100,
+		SpeedLimitDownEnabled: false,
+		SpeedLimitUp:          100,
+		SpeedLimitUpEnabled:   false,
+		SeedRatioLimit:        2.0,
+		SeedRatioLimited:      false,
+		StartAddedTorrents:    true,
+		CacheSizeMB:           4,
+		Version:               "go-i2p-bt/1.0.0",
+	}
+}
+
+// initializeDHTServer sets up the DHT server if enabled in configuration
+func (tm *TorrentManager) initializeDHTServer() error {
+	if !tm.config.SessionConfig.DHTEnabled {
+		return nil
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-
-	tm := &TorrentManager{
-		config:        config,
-		torrents:      make(map[int64]*TorrentState),
-		nextID:        1,
-		sessionConfig: config.SessionConfig,
-		ctx:           ctx,
-		cancel:        cancel,
-		log:           config.ErrorLog,
+	dhtAddr := fmt.Sprintf(":%d", tm.config.PeerPort)
+	dhtConn, err := net.ListenPacket("udp", dhtAddr)
+	if err != nil {
+		return fmt.Errorf("failed to create DHT connection on %s: %w", dhtAddr, err)
 	}
 
-	// Initialize DHT server if enabled
-	if config.SessionConfig.DHTEnabled {
-		dhtAddr := fmt.Sprintf(":%d", config.PeerPort)
-		dhtConn, err := net.ListenPacket("udp", dhtAddr)
-		if err != nil {
-			tm.log("Failed to create DHT connection on %s: %v", dhtAddr, err)
-			// Continue without DHT - not a fatal error
-		} else {
-			tm.dhtConn = dhtConn
+	tm.dhtConn = dhtConn
 
-			dhtConfig := dht.Config{
-				ID:        config.DHTConfig.ID,
-				K:         config.DHTConfig.K,
-				ReadOnly:  config.DHTConfig.ReadOnly,
-				ErrorLog:  config.ErrorLog,
-				OnSearch:  tm.onDHTSearch,
-				OnTorrent: tm.onDHTTorrent,
-			}
-
-			tm.dhtServer = dht.NewServer(dhtConn, dhtConfig)
-			go tm.dhtServer.Run()
-
-			tm.log("DHT server initialized on %s", dhtAddr)
-		}
+	dhtConfig := dht.Config{
+		ID:        tm.config.DHTConfig.ID,
+		K:         tm.config.DHTConfig.K,
+		ReadOnly:  tm.config.DHTConfig.ReadOnly,
+		ErrorLog:  tm.config.ErrorLog,
+		OnSearch:  tm.onDHTSearch,
+		OnTorrent: tm.onDHTTorrent,
 	}
 
-	// Initialize torrent downloader
-	tm.downloader = downloader.NewTorrentDownloader(config.DownloaderConfig)
+	tm.dhtServer = dht.NewServer(dhtConn, dhtConfig)
+	go tm.dhtServer.Run()
+
+	tm.log("DHT server initialized on %s", dhtAddr)
+	return nil
+}
+
+// initializeDownloader creates the torrent downloader and sets up DHT integration
+func (tm *TorrentManager) initializeDownloader() {
+	tm.downloader = downloader.NewTorrentDownloader(tm.config.DownloaderConfig)
 
 	// Set up DHT integration with downloader for peer discovery
 	if tm.dhtServer != nil {
-		tm.downloader.OnDHTNode(func(host string, port uint16) {
-			// This callback receives DHT node information from peers
-			// We could ping these nodes to add them to our DHT routing table
-			addr, err := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:%d", host, port))
-			if err == nil {
-				_ = tm.dhtServer.Ping(addr)
-			}
-		})
+		tm.setupDHTIntegration()
 	}
+}
 
-	// Start background processes
+// setupDHTIntegration configures the downloader to work with the DHT server for peer discovery
+func (tm *TorrentManager) setupDHTIntegration() {
+	tm.downloader.OnDHTNode(func(host string, port uint16) {
+		// This callback receives DHT node information from peers
+		// We could ping these nodes to add them to our DHT routing table
+		addr, err := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:%d", host, port))
+		if err == nil {
+			_ = tm.dhtServer.Ping(addr)
+		}
+	})
+}
+
+// startBackgroundProcesses launches the background goroutines for torrent management
+func (tm *TorrentManager) startBackgroundProcesses() {
 	go tm.processDownloaderResponses()
 	go tm.updateTorrentStats()
-
-	return tm, nil
 }
 
 // Close shuts down the TorrentManager and releases resources
