@@ -371,38 +371,19 @@ func (m *RPCMethods) applyTorrentChanges(torrent *TorrentState, req TorrentActio
 		return fmt.Errorf("failed to initialize file arrays: %v", err)
 	}
 
-	// Apply bandwidth priority changes
-	if req.BandwidthPriority != 0 {
-		// Store bandwidth priority for use by transfer scheduling
-		// In a full implementation, this would affect download/upload ordering
+	// Apply bandwidth priority updates
+	m.applyBandwidthPriorityChanges(torrent, req)
+
+	// Apply file management changes
+	if err := m.applyFileManagementChanges(torrent, req); err != nil {
+		return err
 	}
 
-	// Apply file selection changes
-	if err := m.updateFileSelection(torrent, req); err != nil {
-		return fmt.Errorf("file selection update failed: %v", err)
-	}
+	// Apply seeding configuration changes
+	m.applySeedingConfigurationChanges(torrent, req)
 
-	// Apply file priority changes
-	if err := m.updateFilePriorities(torrent, req); err != nil {
-		return fmt.Errorf("file priority update failed: %v", err)
-	}
-
-	// Apply seeding configuration
-	if req.SeedRatioLimit > 0 {
-		torrent.SeedRatioLimit = req.SeedRatioLimit
-	}
-	if req.SeedIdleLimit > 0 {
-		torrent.SeedIdleLimit = req.SeedIdleLimit
-	}
-	if req.HonorsSessionLimits {
-		torrent.HonorsSessionLimits = req.HonorsSessionLimits
-	}
-
-	// Apply label changes (copy to avoid reference issues)
-	if len(req.Labels) > 0 {
-		torrent.Labels = make([]string, len(req.Labels))
-		copy(torrent.Labels, req.Labels)
-	}
+	// Apply torrent metadata changes
+	m.applyTorrentMetadataChanges(torrent, req)
 
 	// Apply tracker management
 	if err := m.updateTrackers(torrent, req); err != nil {
@@ -417,6 +398,55 @@ func (m *RPCMethods) applyTorrentChanges(torrent *TorrentState, req TorrentActio
 	}
 
 	return nil
+}
+
+// applyBandwidthPriorityChanges applies bandwidth priority updates to the torrent.
+// Bandwidth priority affects download/upload scheduling in transfer management.
+func (m *RPCMethods) applyBandwidthPriorityChanges(torrent *TorrentState, req TorrentActionRequest) {
+	if req.BandwidthPriority != 0 {
+		// Store bandwidth priority for use by transfer scheduling
+		// In a full implementation, this would affect download/upload ordering
+	}
+}
+
+// applyFileManagementChanges applies file selection and priority changes with proper error handling.
+// This function coordinates file wanted/unwanted status and priority level updates.
+func (m *RPCMethods) applyFileManagementChanges(torrent *TorrentState, req TorrentActionRequest) error {
+	// Apply file selection changes
+	if err := m.updateFileSelection(torrent, req); err != nil {
+		return fmt.Errorf("file selection update failed: %v", err)
+	}
+
+	// Apply file priority changes
+	if err := m.updateFilePriorities(torrent, req); err != nil {
+		return fmt.Errorf("file priority update failed: %v", err)
+	}
+
+	return nil
+}
+
+// applySeedingConfigurationChanges applies seeding-related configuration updates to the torrent.
+// This includes seed ratio limits, idle limits, and session limit compliance settings.
+func (m *RPCMethods) applySeedingConfigurationChanges(torrent *TorrentState, req TorrentActionRequest) {
+	if req.SeedRatioLimit > 0 {
+		torrent.SeedRatioLimit = req.SeedRatioLimit
+	}
+	if req.SeedIdleLimit > 0 {
+		torrent.SeedIdleLimit = req.SeedIdleLimit
+	}
+	if req.HonorsSessionLimits {
+		torrent.HonorsSessionLimits = req.HonorsSessionLimits
+	}
+}
+
+// applyTorrentMetadataChanges applies general torrent metadata updates including labels.
+// Labels are copied to avoid reference issues with the original request slice.
+func (m *RPCMethods) applyTorrentMetadataChanges(torrent *TorrentState, req TorrentActionRequest) {
+	// Apply label changes (copy to avoid reference issues)
+	if len(req.Labels) > 0 {
+		torrent.Labels = make([]string, len(req.Labels))
+		copy(torrent.Labels, req.Labels)
+	}
 }
 
 // ensureFileArraysInitialized ensures Wanted and Priorities arrays are properly sized
