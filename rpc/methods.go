@@ -758,6 +758,28 @@ func (m *RPCMethods) SessionSet(req SessionSetRequest) error {
 	config := m.manager.GetSessionConfig()
 
 	// Update configuration based on request
+	m.updateSpeedLimitSettings(&config, req)
+	m.updatePeerNetworkSettings(&config, req)
+	m.updateQueueSettings(&config, req)
+	m.updateSeedingSettings(&config, req)
+	m.updateDirectorySettings(&config, req)
+	m.updateSecuritySettings(&config, req)
+
+	// Apply the updated configuration
+	if err := m.manager.UpdateSessionConfig(config); err != nil {
+		return &RPCError{
+			Code:    ErrCodeInvalidArgument,
+			Message: err.Error(),
+		}
+	}
+
+	return nil
+}
+
+// updateSpeedLimitSettings updates speed limit and alternate speed configurations.
+// This includes both regular speed limits and alternate speed settings which are
+// typically used for scheduled bandwidth throttling during specific hours.
+func (m *RPCMethods) updateSpeedLimitSettings(config *SessionConfiguration, req SessionSetRequest) {
 	if req.AltSpeedDown != nil {
 		config.AltSpeedDown = *req.AltSpeedDown
 	}
@@ -767,35 +789,26 @@ func (m *RPCMethods) SessionSet(req SessionSetRequest) error {
 	if req.AltSpeedUp != nil {
 		config.AltSpeedUp = *req.AltSpeedUp
 	}
-	if req.BlocklistEnabled != nil {
-		config.BlocklistEnabled = *req.BlocklistEnabled
+	if req.SpeedLimitDown != nil {
+		config.SpeedLimitDown = *req.SpeedLimitDown
 	}
-	if req.BlocklistURL != nil {
-		config.BlocklistURL = *req.BlocklistURL
+	if req.SpeedLimitDownEnabled != nil {
+		config.SpeedLimitDownEnabled = *req.SpeedLimitDownEnabled
 	}
-	if req.CacheSizeMB != nil {
-		config.CacheSizeMB = *req.CacheSizeMB
+	if req.SpeedLimitUp != nil {
+		config.SpeedLimitUp = *req.SpeedLimitUp
 	}
+	if req.SpeedLimitUpEnabled != nil {
+		config.SpeedLimitUpEnabled = *req.SpeedLimitUpEnabled
+	}
+}
+
+// updatePeerNetworkSettings updates peer connection and network protocol configurations.
+// This includes DHT, PEX, LPD protocols and peer connection limits that control
+// how the client discovers and connects to other peers in the BitTorrent network.
+func (m *RPCMethods) updatePeerNetworkSettings(config *SessionConfiguration, req SessionSetRequest) {
 	if req.DHT != nil {
 		config.DHTEnabled = *req.DHT
-	}
-	if req.DownloadDir != nil {
-		config.DownloadDir = *req.DownloadDir
-	}
-	if req.DownloadQueueEnabled != nil {
-		config.DownloadQueueEnabled = *req.DownloadQueueEnabled
-	}
-	if req.DownloadQueueSize != nil {
-		config.DownloadQueueSize = *req.DownloadQueueSize
-	}
-	if req.Encryption != nil {
-		config.Encryption = *req.Encryption
-	}
-	if req.IdleSeedingLimit != nil {
-		config.IdleSeedingLimit = *req.IdleSeedingLimit
-	}
-	if req.IdleSeedingLimitEnabled != nil {
-		config.IdleSeedingLimitEnabled = *req.IdleSeedingLimitEnabled
 	}
 	if req.LPD != nil {
 		config.LPDEnabled = *req.LPD
@@ -812,11 +825,38 @@ func (m *RPCMethods) SessionSet(req SessionSetRequest) error {
 	if req.PEX != nil {
 		config.PEXEnabled = *req.PEX
 	}
+	if req.UTP != nil {
+		config.UTPEnabled = *req.UTP
+	}
+}
+
+// updateQueueSettings updates download and seed queue configurations.
+// Queue settings control how many torrents can be actively downloading
+// or seeding simultaneously, with others waiting in queue.
+func (m *RPCMethods) updateQueueSettings(config *SessionConfiguration, req SessionSetRequest) {
+	if req.DownloadQueueEnabled != nil {
+		config.DownloadQueueEnabled = *req.DownloadQueueEnabled
+	}
+	if req.DownloadQueueSize != nil {
+		config.DownloadQueueSize = *req.DownloadQueueSize
+	}
 	if req.SeedQueueEnabled != nil {
 		config.SeedQueueEnabled = *req.SeedQueueEnabled
 	}
 	if req.SeedQueueSize != nil {
 		config.SeedQueueSize = *req.SeedQueueSize
+	}
+}
+
+// updateSeedingSettings updates seeding behavior and ratio configurations.
+// These settings control when torrents stop seeding based on upload ratio
+// or idle time, helping manage seeding resource allocation.
+func (m *RPCMethods) updateSeedingSettings(config *SessionConfiguration, req SessionSetRequest) {
+	if req.IdleSeedingLimit != nil {
+		config.IdleSeedingLimit = *req.IdleSeedingLimit
+	}
+	if req.IdleSeedingLimitEnabled != nil {
+		config.IdleSeedingLimitEnabled = *req.IdleSeedingLimitEnabled
 	}
 	if req.SeedRatioLimit != nil {
 		config.SeedRatioLimit = *req.SeedRatioLimit
@@ -824,34 +864,35 @@ func (m *RPCMethods) SessionSet(req SessionSetRequest) error {
 	if req.SeedRatioLimited != nil {
 		config.SeedRatioLimited = *req.SeedRatioLimited
 	}
-	if req.SpeedLimitDown != nil {
-		config.SpeedLimitDown = *req.SpeedLimitDown
+}
+
+// updateDirectorySettings updates file system and download directory configurations.
+// This includes download directory paths, cache settings, and torrent startup behavior.
+func (m *RPCMethods) updateDirectorySettings(config *SessionConfiguration, req SessionSetRequest) {
+	if req.DownloadDir != nil {
+		config.DownloadDir = *req.DownloadDir
 	}
-	if req.SpeedLimitDownEnabled != nil {
-		config.SpeedLimitDownEnabled = *req.SpeedLimitDownEnabled
-	}
-	if req.SpeedLimitUp != nil {
-		config.SpeedLimitUp = *req.SpeedLimitUp
-	}
-	if req.SpeedLimitUpEnabled != nil {
-		config.SpeedLimitUpEnabled = *req.SpeedLimitUpEnabled
+	if req.CacheSizeMB != nil {
+		config.CacheSizeMB = *req.CacheSizeMB
 	}
 	if req.StartAddedTorrents != nil {
 		config.StartAddedTorrents = *req.StartAddedTorrents
 	}
-	if req.UTP != nil {
-		config.UTPEnabled = *req.UTP
-	}
+}
 
-	// Apply the updated configuration
-	if err := m.manager.UpdateSessionConfig(config); err != nil {
-		return &RPCError{
-			Code:    ErrCodeInvalidArgument,
-			Message: err.Error(),
-		}
+// updateSecuritySettings updates encryption and blocklist security configurations.
+// These settings control peer connection encryption and IP address blocking
+// for enhanced privacy and security of BitTorrent connections.
+func (m *RPCMethods) updateSecuritySettings(config *SessionConfiguration, req SessionSetRequest) {
+	if req.Encryption != nil {
+		config.Encryption = *req.Encryption
 	}
-
-	return nil
+	if req.BlocklistEnabled != nil {
+		config.BlocklistEnabled = *req.BlocklistEnabled
+	}
+	if req.BlocklistURL != nil {
+		config.BlocklistURL = *req.BlocklistURL
+	}
 }
 
 // SessionStats implements the session-stats RPC method
