@@ -126,49 +126,84 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Validate HTTP request requirements
+	if !s.validateHTTPRequest(w, r) {
+		return
+	}
+
+	// Parse the JSON-RPC request
+	rpcReq, ok := s.parseRPCRequest(w, r)
+	if !ok {
+		return
+	}
+
+	// Validate authentication and session tokens
+	if !s.validateRPCAuthentication(w, r, rpcReq) {
+		return
+	}
+
+	// Process the RPC request
+	s.processRPCRequest(w, r, rpcReq)
+}
+
+// validateHTTPRequest validates the HTTP request method, content type, and size.
+// Returns false if validation fails and an error response has been sent.
+func (s *Server) validateHTTPRequest(w http.ResponseWriter, r *http.Request) bool {
 	// Only allow POST requests for RPC
 	if r.Method != "POST" {
 		s.sendError(w, http.StatusMethodNotAllowed, ErrCodeInvalidRequest, "Only POST method allowed")
-		return
+		return false
 	}
 
 	// Check content type
 	contentType := r.Header.Get("Content-Type")
 	if !strings.Contains(contentType, "application/json") {
 		s.sendError(w, http.StatusBadRequest, ErrCodeInvalidRequest, "Content-Type must be application/json")
-		return
+		return false
 	}
 
 	// Check request size
 	if r.ContentLength > s.config.MaxRequestSize {
 		s.sendError(w, http.StatusRequestEntityTooLarge, ErrCodeInvalidRequest, "Request too large")
-		return
+		return false
 	}
 
+	return true
+}
+
+// parseRPCRequest reads and parses the JSON-RPC request from the HTTP request body.
+// Returns the parsed request and true on success, or nil and false if parsing fails.
+func (s *Server) parseRPCRequest(w http.ResponseWriter, r *http.Request) (*Request, bool) {
 	// Read request body
 	body, err := io.ReadAll(io.LimitReader(r.Body, s.config.MaxRequestSize))
 	if err != nil {
 		s.sendError(w, http.StatusBadRequest, ErrCodeInvalidRequest, "Failed to read request body")
-		return
+		return nil, false
 	}
 
 	// Parse JSON-RPC request
 	var rpcReq Request
 	if err := json.Unmarshal(body, &rpcReq); err != nil {
 		s.sendError(w, http.StatusBadRequest, ErrCodeParseError, "Invalid JSON")
-		return
+		return nil, false
 	}
 
 	// Validate JSON-RPC version
 	if rpcReq.Version != "2.0" {
 		s.sendError(w, http.StatusBadRequest, ErrCodeInvalidRequest, "Invalid JSON-RPC version")
-		return
+		return nil, false
 	}
 
+	return &rpcReq, true
+}
+
+// validateRPCAuthentication checks HTTP authentication and session tokens for the RPC request.
+// Returns false if validation fails and an error response has been sent.
+func (s *Server) validateRPCAuthentication(w http.ResponseWriter, r *http.Request, rpcReq *Request) bool {
 	// Check authentication
 	if !s.checkAuth(r) {
 		s.sendError(w, http.StatusUnauthorized, ErrCodeInternalError, "Authentication required")
-		return
+		return false
 	}
 
 	// Check session token for state-changing operations
@@ -177,12 +212,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			// Send session token error
 			w.Header().Set(s.config.SessionTokenHeader, s.sessionID)
 			s.sendError(w, http.StatusConflict, ErrCodeInternalError, "Session token required")
-			return
+			return false
 		}
 	}
 
-	// Process the RPC request
-	s.processRPCRequest(w, r, &rpcReq)
+	return true
 }
 
 // processRPCRequest handles the actual RPC method execution
