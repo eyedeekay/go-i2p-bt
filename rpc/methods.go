@@ -186,6 +186,7 @@ func (m *RPCMethods) TorrentStop(req TorrentActionRequest) error {
 }
 
 // TorrentVerify implements the torrent-verify RPC method
+// This method performs actual data integrity verification by checking piece hashes
 func (m *RPCMethods) TorrentVerify(req TorrentActionRequest) error {
 	ids, err := m.manager.ResolveTorrentIDs(req.IDs)
 	if err != nil {
@@ -195,16 +196,14 @@ func (m *RPCMethods) TorrentVerify(req TorrentActionRequest) error {
 		}
 	}
 
-	// For each torrent, set status to verifying
-	// In a full implementation, this would actually verify the data
+	// For each torrent, perform actual verification
 	for _, id := range ids {
-		torrent, err := m.manager.GetTorrent(id)
-		if err != nil {
-			continue
+		if err := m.manager.VerifyTorrent(id); err != nil {
+			return &RPCError{
+				Code:    ErrCodeInternalError,
+				Message: fmt.Sprintf("failed to verify torrent %d: %v", id, err),
+			}
 		}
-
-		// Set status to verifying
-		torrent.Status = TorrentStatusVerifying
 	}
 
 	return nil
@@ -777,21 +776,19 @@ func (m *RPCMethods) updateTorrentLocation(torrent *TorrentState, location strin
 		return fmt.Errorf("location cannot be empty")
 	}
 
-	// Update the download directory
+	// Check if file moving is requested
+	if move {
+		// Return explicit error for unimplemented file moving functionality
+		// This prevents silent failures and makes the limitation clear to clients
+		return fmt.Errorf("file moving functionality is not implemented - location can only be updated for new downloads")
+	}
+
+	// Update the download directory for future downloads
 	torrent.DownloadDir = location
 
 	// NOTE: File moving functionality is not implemented in this minimal viable solution
-	// In a full implementation, when move=true, this would:
-	// 1. Verify source files exist
-	// 2. Create destination directory
-	// 3. Move files atomically
-	// 4. Handle move failures gracefully
-	// 5. Update file paths in torrent state
-
-	if move {
-		// Log that move functionality is not yet implemented
-		// In production, return an error or implement actual moving
-	}
+	// When move=false, we only update the download directory for new files
+	// Existing downloaded files remain in their current location
 
 	return nil
 }

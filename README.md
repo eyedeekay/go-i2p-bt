@@ -31,7 +31,7 @@ $ go get -u github.com/go-i2p/go-i2p-bt
 - [ ] [**BEP 11:** Peer Exchange (PEX)](http://bittorrent.org/beps/bep_0011.html)
 - [x] [**BEP 12:** Multitracker Metadata Extension](http://bittorrent.org/beps/bep_0012.html)
 - [x] [**BEP 15:** UDP Tracker Protocol for BitTorrent](http://bittorrent.org/beps/bep_0015.html)
-- [x] [**BEP 19:** WebSeed - HTTP/FTP Seeding (GetRight style)](http://bittorrent.org/beps/bep_0019.html) (Only `url-list` in metainfo)
+- [ ] [**BEP 19:** WebSeed - HTTP/FTP Seeding (GetRight style)](http://bittorrent.org/beps/bep_0019.html) (Only `url-list` parsing implemented - HTTP seeding not functional)
 - [x] [**BEP 23:** Tracker Returns Compact Peer Lists](http://bittorrent.org/beps/bep_0023.html)
 - [x] [**BEP 32:** IPv6 extension for DHT](http://bittorrent.org/beps/bep_0032.html)
 - [ ] [**BEP 33:** DHT scrape](http://bittorrent.org/beps/bep_0033.html)

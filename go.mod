@@ -1,5 +1,6 @@
 module github.com/go-i2p/go-i2p-bt
 
+// Minimum Go version requirement - enforced by Go toolchain
 go 1.23.1
 
 require (
