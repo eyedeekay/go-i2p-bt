@@ -1512,12 +1512,12 @@ func TestIncompleteDirValidation(t *testing.T) {
 	}()
 
 	tests := []struct {
-		name             string
-		incompleteDir    string
-		enabled          bool
-		shouldCreateDir  bool
-		shouldError      bool
-		errorContains    string
+		name            string
+		incompleteDir   string
+		enabled         bool
+		shouldCreateDir bool
+		shouldError     bool
+		errorContains   string
 	}{
 		{
 			name:            "Valid directory path",
@@ -1714,5 +1714,3 @@ func stringPtr(s string) *string {
 func boolPtr(b bool) *bool {
 	return &b
 }
-
-
