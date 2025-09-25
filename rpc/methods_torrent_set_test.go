@@ -616,7 +616,7 @@ func TestTorrentSetLocationUpdate(t *testing.T) {
 			name:        "Move flag set (not implemented)",
 			location:    "/another/path",
 			move:        true,
-			expectError: false, // Move flag is acknowledged but actual moving not implemented
+			expectError: true, // Move flag should return error since file moving is not implemented
 		},
 	}
 
