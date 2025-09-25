@@ -67,10 +67,11 @@ type TorrentManager struct {
 	config TorrentManagerConfig
 
 	// Core components
-	dhtServer    *dht.Server
-	dhtConn      net.PacketConn
-	downloader   *downloader.TorrentDownloader
-	queueManager *QueueManager
+	dhtServer        *dht.Server
+	dhtConn          net.PacketConn
+	downloader       *downloader.TorrentDownloader
+	queueManager     *QueueManager
+	bandwidthManager *BandwidthManager
 
 	// Thread-safe torrent storage
 	mu       sync.RWMutex
@@ -124,6 +125,9 @@ func NewTorrentManager(config TorrentManagerConfig) (*TorrentManager, error) {
 	}
 
 	tm.queueManager = NewQueueManager(queueConfig, tm.onTorrentActivated, tm.onTorrentDeactivated)
+
+	// Initialize bandwidth manager with session configuration
+	tm.bandwidthManager = NewBandwidthManager(config.SessionConfig)
 
 	// Initialize DHT server if enabled
 	if err := tm.initializeDHTServer(); err != nil {
@@ -856,12 +860,14 @@ func (tm *TorrentManager) updatePeerLimits(config SessionConfiguration) {
 
 // updateSpeedLimits updates transfer speed limits
 func (tm *TorrentManager) updateSpeedLimits(config SessionConfiguration) {
+	// Update bandwidth manager with new limits
+	tm.bandwidthManager.UpdateConfiguration(config)
+
 	tm.log("Speed limits updated: down=%d (enabled=%t), up=%d (enabled=%t)",
 		config.SpeedLimitDown, config.SpeedLimitDownEnabled,
 		config.SpeedLimitUp, config.SpeedLimitUpEnabled)
 
-	// Note: Speed limit enforcement would typically be implemented in the
-	// peer protocol or downloader components. This logs the change for now.
+	tm.log("Bandwidth manager: %s", tm.bandwidthManager.String())
 }
 
 // Queue Management Methods
@@ -1691,4 +1697,23 @@ func (tm *TorrentManager) startTorrentSeeding(torrent *TorrentState) {
 	tm.mu.Unlock()
 
 	tm.log("Started seeding torrent %d", torrent.ID)
+}
+
+// Bandwidth Management Methods
+
+// WaitForDownloadBandwidth blocks until the specified number of download bytes can be transferred
+// This method should be called by downloader components before transferring data
+func (tm *TorrentManager) WaitForDownloadBandwidth(ctx context.Context, bytes int64) error {
+	return tm.bandwidthManager.WaitForDownload(ctx, bytes)
+}
+
+// WaitForUploadBandwidth blocks until the specified number of upload bytes can be transferred
+// This method should be called by uploader components before transferring data
+func (tm *TorrentManager) WaitForUploadBandwidth(ctx context.Context, bytes int64) error {
+	return tm.bandwidthManager.WaitForUpload(ctx, bytes)
+}
+
+// GetBandwidthStats returns current bandwidth limiter statistics
+func (tm *TorrentManager) GetBandwidthStats() (downloadTokens, downloadMax, uploadTokens, uploadMax int64) {
+	return tm.bandwidthManager.GetStats()
 }
