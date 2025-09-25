@@ -67,9 +67,10 @@ type TorrentManager struct {
 	config TorrentManagerConfig
 
 	// Core components
-	dhtServer  *dht.Server
-	dhtConn    net.PacketConn
-	downloader *downloader.TorrentDownloader
+	dhtServer    *dht.Server
+	dhtConn      net.PacketConn
+	downloader   *downloader.TorrentDownloader
+	queueManager *QueueManager
 
 	// Thread-safe torrent storage
 	mu       sync.RWMutex
@@ -112,6 +113,17 @@ func NewTorrentManager(config TorrentManagerConfig) (*TorrentManager, error) {
 		cancel:        cancel,
 		log:           config.ErrorLog,
 	}
+
+	// Initialize queue manager with session configuration
+	queueConfig := QueueConfig{
+		MaxActiveDownloads:   config.SessionConfig.DownloadQueueSize,
+		MaxActiveSeeds:       config.SessionConfig.SeedQueueSize,
+		ProcessInterval:      5 * time.Second,
+		DownloadQueueEnabled: config.SessionConfig.DownloadQueueEnabled,
+		SeedQueueEnabled:     config.SessionConfig.SeedQueueEnabled,
+	}
+
+	tm.queueManager = NewQueueManager(queueConfig, tm.onTorrentActivated, tm.onTorrentDeactivated)
 
 	// Initialize DHT server if enabled
 	if err := tm.initializeDHTServer(); err != nil {
@@ -245,6 +257,10 @@ func (tm *TorrentManager) startBackgroundProcesses() {
 // Close shuts down the TorrentManager and releases resources
 func (tm *TorrentManager) Close() error {
 	tm.cancel()
+
+	if tm.queueManager != nil {
+		tm.queueManager.Close()
+	}
 
 	if tm.downloader != nil {
 		tm.downloader.Close()
@@ -525,7 +541,7 @@ func (tm *TorrentManager) GetAllTorrents() []*TorrentState {
 	return torrents
 }
 
-// StartTorrent starts downloading/seeding a torrent
+// StartTorrent starts downloading/seeding a torrent using queue management
 func (tm *TorrentManager) StartTorrent(id int64) error {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
@@ -539,10 +555,22 @@ func (tm *TorrentManager) StartTorrent(id int64) error {
 		return nil // Already started
 	}
 
-	torrent.Status = TorrentStatusDownloading
-	torrent.StartDate = time.Now()
+	// Determine queue type based on completion status
+	var queueType QueueType
+	if torrent.PercentDone >= 1.0 {
+		// Torrent is complete, queue for seeding
+		queueType = SeedQueue
+		torrent.Status = TorrentStatusQueuedSeed
+	} else {
+		// Torrent is incomplete, queue for downloading
+		queueType = DownloadQueue
+		torrent.Status = TorrentStatusQueuedDown
+	}
 
-	go tm.startTorrent(torrent)
+	// Add to appropriate queue with normal priority
+	if err := tm.queueManager.AddToQueue(id, queueType, 0); err != nil {
+		return fmt.Errorf("failed to add torrent to queue: %v", err)
+	}
 
 	return nil
 }
@@ -563,9 +591,20 @@ func (tm *TorrentManager) StartTorrentNow(id int64) error {
 		return nil // Already started
 	}
 
-	// Immediately start torrent, bypassing any potential queue logic
-	torrent.Status = TorrentStatusDownloading
+	// Determine queue type based on completion status
+	var queueType QueueType
+	if torrent.PercentDone >= 1.0 {
+		queueType = SeedQueue
+		torrent.Status = TorrentStatusSeeding
+	} else {
+		queueType = DownloadQueue
+		torrent.Status = TorrentStatusDownloading
+	}
+
 	torrent.StartDate = time.Now()
+
+	// Force immediate activation bypassing queue limits
+	tm.queueManager.ForceActivate(id, queueType)
 
 	// Start torrent immediately without queue delays
 	go tm.startTorrent(torrent)
@@ -583,6 +622,9 @@ func (tm *TorrentManager) StopTorrent(id int64) error {
 		return fmt.Errorf("torrent with ID %d not found", id)
 	}
 
+	// Remove from queue management if present
+	tm.queueManager.RemoveFromQueue(id)
+
 	torrent.Status = TorrentStatusStopped
 
 	// TODO: Implement actual stopping of download/upload operations
@@ -599,6 +641,9 @@ func (tm *TorrentManager) RemoveTorrent(id int64, deleteData bool) error {
 	if !exists {
 		return fmt.Errorf("torrent with ID %d not found", id)
 	}
+
+	// Remove from queue management
+	tm.queueManager.RemoveFromQueue(id)
 
 	// Stop the torrent first
 	torrent.Status = TorrentStatusStopped
@@ -631,11 +676,222 @@ func (tm *TorrentManager) UpdateSessionConfig(config SessionConfiguration) error
 		return fmt.Errorf("invalid peer port: %d", config.PeerPort)
 	}
 
+	if config.PeerLimitGlobal < 0 {
+		return fmt.Errorf("peer limit global cannot be negative: %d", config.PeerLimitGlobal)
+	}
+
+	if config.PeerLimitPerTorrent < 0 {
+		return fmt.Errorf("peer limit per torrent cannot be negative: %d", config.PeerLimitPerTorrent)
+	}
+
+	if config.DownloadQueueSize < 0 {
+		return fmt.Errorf("download queue size cannot be negative: %d", config.DownloadQueueSize)
+	}
+
+	if config.SeedQueueSize < 0 {
+		return fmt.Errorf("seed queue size cannot be negative: %d", config.SeedQueueSize)
+	}
+
+	// Validate and create download directory if necessary
+	if config.DownloadDir != "" {
+		if err := tm.validateAndCreateDownloadDir(config.DownloadDir); err != nil {
+			return fmt.Errorf("invalid download directory: %w", err)
+		}
+	}
+
+	// Store previous configuration for comparison
+	oldConfig := tm.sessionConfig
 	tm.sessionConfig = config
 
-	// TODO: Apply configuration changes to running components
+	// Apply configuration changes to running components
+	if err := tm.applyRuntimeConfigChanges(oldConfig, config); err != nil {
+		// Revert configuration on failure
+		tm.sessionConfig = oldConfig
+		return fmt.Errorf("failed to apply configuration changes: %w", err)
+	}
 
 	return nil
+}
+
+// validateAndCreateDownloadDir validates and creates the download directory if needed
+func (tm *TorrentManager) validateAndCreateDownloadDir(downloadDir string) error {
+	// Check if directory exists
+	if _, err := os.Stat(downloadDir); err != nil {
+		if os.IsNotExist(err) {
+			// Directory doesn't exist, try to create it
+			if err := os.MkdirAll(downloadDir, 0755); err != nil {
+				return fmt.Errorf("cannot create download directory: %w", err)
+			}
+		} else {
+			return fmt.Errorf("cannot access download directory: %w", err)
+		}
+	}
+
+	// Check if it's actually a directory
+	if info, err := os.Stat(downloadDir); err != nil {
+		return fmt.Errorf("cannot stat download directory: %w", err)
+	} else if !info.IsDir() {
+		return fmt.Errorf("download path is not a directory: %s", downloadDir)
+	}
+
+	// Check if directory is writable by attempting to create a temp file
+	testFile := filepath.Join(downloadDir, ".write_test")
+	if file, err := os.Create(testFile); err != nil {
+		return fmt.Errorf("download directory is not writable: %w", err)
+	} else {
+		file.Close()
+		os.Remove(testFile) // Clean up test file
+	}
+
+	return nil
+}
+
+// applyRuntimeConfigChanges applies configuration changes to running components
+func (tm *TorrentManager) applyRuntimeConfigChanges(oldConfig, newConfig SessionConfiguration) error {
+	// Update queue manager configuration if queue settings changed
+	if oldConfig.DownloadQueueEnabled != newConfig.DownloadQueueEnabled ||
+		oldConfig.DownloadQueueSize != newConfig.DownloadQueueSize ||
+		oldConfig.SeedQueueEnabled != newConfig.SeedQueueEnabled ||
+		oldConfig.SeedQueueSize != newConfig.SeedQueueSize {
+
+		if err := tm.updateQueueConfiguration(newConfig); err != nil {
+			return fmt.Errorf("failed to update queue configuration: %w", err)
+		}
+	}
+
+	// Update download directory for existing torrents if changed
+	if oldConfig.DownloadDir != newConfig.DownloadDir && newConfig.DownloadDir != "" {
+		if err := tm.updateDownloadDirectory(newConfig.DownloadDir); err != nil {
+			return fmt.Errorf("failed to update download directory: %w", err)
+		}
+	}
+
+	// Update peer limits if changed
+	if oldConfig.PeerLimitGlobal != newConfig.PeerLimitGlobal ||
+		oldConfig.PeerLimitPerTorrent != newConfig.PeerLimitPerTorrent {
+		tm.updatePeerLimits(newConfig)
+	}
+
+	// Update speed limits if changed
+	if oldConfig.SpeedLimitDown != newConfig.SpeedLimitDown ||
+		oldConfig.SpeedLimitDownEnabled != newConfig.SpeedLimitDownEnabled ||
+		oldConfig.SpeedLimitUp != newConfig.SpeedLimitUp ||
+		oldConfig.SpeedLimitUpEnabled != newConfig.SpeedLimitUpEnabled {
+		tm.updateSpeedLimits(newConfig)
+	}
+
+	return nil
+}
+
+// updateQueueConfiguration updates the queue manager with new settings
+func (tm *TorrentManager) updateQueueConfiguration(config SessionConfiguration) error {
+	// Update queue manager limits by modifying its configuration
+	tm.queueManager.mu.Lock()
+	tm.queueManager.config.MaxActiveDownloads = config.DownloadQueueSize
+	tm.queueManager.config.MaxActiveSeeds = config.SeedQueueSize
+	tm.queueManager.config.DownloadQueueEnabled = config.DownloadQueueEnabled
+	tm.queueManager.config.SeedQueueEnabled = config.SeedQueueEnabled
+	tm.queueManager.mu.Unlock()
+
+	// If queues are disabled, force activate all queued torrents
+	if !config.DownloadQueueEnabled {
+		tm.queueManager.mu.RLock()
+		queuedTorrents := make([]int64, 0, len(tm.queueManager.downloadQueue))
+		for torrentID := range tm.queueManager.downloadQueue {
+			queuedTorrents = append(queuedTorrents, torrentID)
+		}
+		tm.queueManager.mu.RUnlock()
+
+		for _, torrentID := range queuedTorrents {
+			tm.queueManager.ForceActivate(torrentID, DownloadQueue)
+			tm.log("Activated download torrent %d when disabling download queue", torrentID)
+		}
+	}
+
+	if !config.SeedQueueEnabled {
+		tm.queueManager.mu.RLock()
+		queuedTorrents := make([]int64, 0, len(tm.queueManager.seedQueue))
+		for torrentID := range tm.queueManager.seedQueue {
+			queuedTorrents = append(queuedTorrents, torrentID)
+		}
+		tm.queueManager.mu.RUnlock()
+
+		for _, torrentID := range queuedTorrents {
+			tm.queueManager.ForceActivate(torrentID, SeedQueue)
+			tm.log("Activated seed torrent %d when disabling seed queue", torrentID)
+		}
+	}
+
+	return nil
+}
+
+// updateDownloadDirectory updates the download directory for torrents
+func (tm *TorrentManager) updateDownloadDirectory(newDir string) error {
+	tm.mu.RLock()
+	defer tm.mu.RUnlock()
+
+	// Update the base configuration
+	tm.config.DownloadDir = newDir
+
+	// Note: Individual torrent download paths are typically set when torrents are added
+	// and shouldn't be changed for active downloads. This mainly affects new torrents.
+	tm.log("Download directory updated to: %s (affects new torrents)", newDir)
+
+	return nil
+}
+
+// updatePeerLimits updates peer connection limits
+func (tm *TorrentManager) updatePeerLimits(config SessionConfiguration) {
+	// Update the configuration that will be used for new torrents
+	tm.config.PeerLimitGlobal = config.PeerLimitGlobal
+	tm.config.PeerLimitPerTorrent = config.PeerLimitPerTorrent
+
+	tm.log("Peer limits updated: global=%d, per_torrent=%d",
+		config.PeerLimitGlobal, config.PeerLimitPerTorrent)
+
+	// Note: Existing peer connections are typically managed by the peer protocol
+	// and downloader components. Runtime limit changes would require component
+	// support for dynamic reconfiguration.
+}
+
+// updateSpeedLimits updates transfer speed limits
+func (tm *TorrentManager) updateSpeedLimits(config SessionConfiguration) {
+	tm.log("Speed limits updated: down=%d (enabled=%t), up=%d (enabled=%t)",
+		config.SpeedLimitDown, config.SpeedLimitDownEnabled,
+		config.SpeedLimitUp, config.SpeedLimitUpEnabled)
+
+	// Note: Speed limit enforcement would typically be implemented in the
+	// peer protocol or downloader components. This logs the change for now.
+}
+
+// Queue Management Methods
+
+// SetTorrentQueuePosition sets the queue position for a torrent
+func (tm *TorrentManager) SetTorrentQueuePosition(id int64, position int64) error {
+	tm.mu.RLock()
+	_, exists := tm.torrents[id]
+	tm.mu.RUnlock()
+
+	if !exists {
+		return fmt.Errorf("torrent with ID %d not found", id)
+	}
+
+	return tm.queueManager.SetQueuePosition(id, position)
+}
+
+// GetTorrentQueuePosition returns the queue position for a torrent (-1 if not queued)
+func (tm *TorrentManager) GetTorrentQueuePosition(id int64) int64 {
+	return tm.queueManager.GetQueuePosition(id)
+}
+
+// GetQueueStats returns current queue statistics
+func (tm *TorrentManager) GetQueueStats() QueueStats {
+	return tm.queueManager.GetStats()
+}
+
+// IsActiveTorrent returns true if the torrent is currently active (not queued)
+func (tm *TorrentManager) IsActiveTorrent(id int64) bool {
+	return tm.queueManager.IsActive(id)
 }
 
 // Private methods
@@ -1357,4 +1613,82 @@ func (tm *TorrentManager) updateFileCompletion(torrent *TorrentState, info metai
 
 		currentOffset += file.Length
 	}
+}
+
+// Queue management callback methods
+
+// onTorrentActivated is called when a torrent is activated from the queue
+func (tm *TorrentManager) onTorrentActivated(torrentID int64, queueType QueueType) {
+	tm.mu.Lock()
+	torrent, exists := tm.torrents[torrentID]
+	if !exists {
+		tm.mu.Unlock()
+		tm.log("Queue activated unknown torrent ID: %d", torrentID)
+		return
+	}
+
+	// Update torrent status based on queue type
+	switch queueType {
+	case DownloadQueue:
+		if torrent.Status == TorrentStatusQueuedDown {
+			torrent.Status = TorrentStatusDownloading
+			tm.log("Torrent %d activated for downloading", torrentID)
+			// Start actual download operation
+			go tm.startTorrentDownload(torrent)
+		}
+	case SeedQueue:
+		if torrent.Status == TorrentStatusQueuedSeed {
+			torrent.Status = TorrentStatusSeeding
+			tm.log("Torrent %d activated for seeding", torrentID)
+			// Start actual seeding operation
+			go tm.startTorrentSeeding(torrent)
+		}
+	}
+
+	tm.mu.Unlock()
+}
+
+// onTorrentDeactivated is called when a torrent should be deactivated
+func (tm *TorrentManager) onTorrentDeactivated(torrentID int64, queueType QueueType) {
+	tm.mu.Lock()
+	torrent, exists := tm.torrents[torrentID]
+	if !exists {
+		tm.mu.Unlock()
+		tm.log("Queue deactivated unknown torrent ID: %d", torrentID)
+		return
+	}
+
+	// Update torrent status to queued state
+	switch queueType {
+	case DownloadQueue:
+		if torrent.Status == TorrentStatusDownloading {
+			torrent.Status = TorrentStatusQueuedDown
+			tm.log("Torrent %d deactivated to download queue", torrentID)
+		}
+	case SeedQueue:
+		if torrent.Status == TorrentStatusSeeding {
+			torrent.Status = TorrentStatusQueuedSeed
+			tm.log("Torrent %d deactivated to seed queue", torrentID)
+		}
+	}
+
+	tm.mu.Unlock()
+}
+
+// startTorrentDownload starts the actual download process for a torrent
+func (tm *TorrentManager) startTorrentDownload(torrent *TorrentState) {
+	// Use the existing private startTorrent method
+	tm.startTorrent(torrent)
+	tm.log("Started downloading torrent %d", torrent.ID)
+}
+
+// startTorrentSeeding starts the actual seeding process for a torrent
+func (tm *TorrentManager) startTorrentSeeding(torrent *TorrentState) {
+	// Implementation would set up seeding operations
+	// For now, we'll just log and mark as seeding
+	tm.mu.Lock()
+	torrent.Status = TorrentStatusSeeding
+	tm.mu.Unlock()
+
+	tm.log("Started seeding torrent %d", torrent.ID)
 }

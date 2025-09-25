@@ -1036,3 +1036,337 @@ func BenchmarkCalculateETA(b *testing.B) {
 		tm.calculateETA(torrent)
 	}
 }
+
+// Tests for UpdateSessionConfig method
+
+func TestUpdateSessionConfig_ValidConfiguration(t *testing.T) {
+	tm, err := NewTorrentManager(createTestTorrentManagerConfig())
+	if err != nil {
+		t.Fatalf("Failed to create TorrentManager: %v", err)
+	}
+	defer tm.Close()
+
+	// Create a temporary directory for testing
+	tempDir, err := ioutil.TempDir("", "session_config_test")
+	if err != nil {
+		t.Fatalf("Failed to create temp directory: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	newConfig := SessionConfiguration{
+		DownloadDir:           tempDir,
+		PeerPort:              6882,
+		PeerLimitGlobal:       100,
+		PeerLimitPerTorrent:   20,
+		DHTEnabled:            true,
+		PEXEnabled:            false,
+		DownloadQueueEnabled:  true,
+		DownloadQueueSize:     5,
+		SeedQueueEnabled:      true,
+		SeedQueueSize:         3,
+		SpeedLimitDown:        1000000,
+		SpeedLimitDownEnabled: true,
+		SpeedLimitUp:          500000,
+		SpeedLimitUpEnabled:   true,
+		StartAddedTorrents:    false,
+	}
+
+	err = tm.UpdateSessionConfig(newConfig)
+	if err != nil {
+		t.Fatalf("Failed to update session config: %v", err)
+	}
+
+	// Verify configuration was applied
+	tm.sessionMu.RLock()
+	config := tm.sessionConfig
+	tm.sessionMu.RUnlock()
+
+	if config.DownloadDir != tempDir {
+		t.Errorf("Expected download dir %s, got %s", tempDir, config.DownloadDir)
+	}
+	if config.PeerPort != 6882 {
+		t.Errorf("Expected peer port 6882, got %d", config.PeerPort)
+	}
+	if config.PeerLimitGlobal != 100 {
+		t.Errorf("Expected peer limit global 100, got %d", config.PeerLimitGlobal)
+	}
+	if config.DownloadQueueSize != 5 {
+		t.Errorf("Expected download queue size 5, got %d", config.DownloadQueueSize)
+	}
+
+	// Verify queue manager configuration was updated
+	tm.queueManager.mu.RLock()
+	queueConfig := tm.queueManager.config
+	tm.queueManager.mu.RUnlock()
+
+	if queueConfig.MaxActiveDownloads != 5 {
+		t.Errorf("Expected queue max active downloads 5, got %d", queueConfig.MaxActiveDownloads)
+	}
+	if queueConfig.MaxActiveSeeds != 3 {
+		t.Errorf("Expected queue max active seeds 3, got %d", queueConfig.MaxActiveSeeds)
+	}
+}
+
+func TestUpdateSessionConfig_InvalidPeerPort(t *testing.T) {
+	tm, err := NewTorrentManager(createTestTorrentManagerConfig())
+	if err != nil {
+		t.Fatalf("Failed to create TorrentManager: %v", err)
+	}
+	defer tm.Close()
+
+	invalidConfigs := []SessionConfiguration{
+		{PeerPort: 0},     // Port 0 is invalid
+		{PeerPort: -1},    // Negative port
+		{PeerPort: 65536}, // Port too large
+	}
+
+	for i, config := range invalidConfigs {
+		err = tm.UpdateSessionConfig(config)
+		if err == nil {
+			t.Errorf("Test %d: Expected error for invalid peer port %d, but got nil", i, config.PeerPort)
+		}
+	}
+}
+
+func TestUpdateSessionConfig_InvalidLimits(t *testing.T) {
+	tm, err := NewTorrentManager(createTestTorrentManagerConfig())
+	if err != nil {
+		t.Fatalf("Failed to create TorrentManager: %v", err)
+	}
+	defer tm.Close()
+
+	invalidConfigs := []struct {
+		config SessionConfiguration
+		desc   string
+	}{
+		{SessionConfiguration{PeerPort: 6881, PeerLimitGlobal: -1}, "negative peer limit global"},
+		{SessionConfiguration{PeerPort: 6881, PeerLimitPerTorrent: -1}, "negative peer limit per torrent"},
+		{SessionConfiguration{PeerPort: 6881, DownloadQueueSize: -1}, "negative download queue size"},
+		{SessionConfiguration{PeerPort: 6881, SeedQueueSize: -1}, "negative seed queue size"},
+	}
+
+	for _, test := range invalidConfigs {
+		err = tm.UpdateSessionConfig(test.config)
+		if err == nil {
+			t.Errorf("Expected error for %s, but got nil", test.desc)
+		}
+	}
+}
+
+func TestUpdateSessionConfig_InvalidDownloadDirectory(t *testing.T) {
+	tm, err := NewTorrentManager(createTestTorrentManagerConfig())
+	if err != nil {
+		t.Fatalf("Failed to create TorrentManager: %v", err)
+	}
+	defer tm.Close()
+
+	// Create a file (not directory) to test invalid directory
+	tempFile, err := ioutil.TempFile("", "not_a_directory")
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+	defer os.Remove(tempFile.Name())
+	tempFile.Close()
+
+	config := SessionConfiguration{
+		PeerPort:    6881,
+		DownloadDir: tempFile.Name(), // This is a file, not a directory
+	}
+
+	err = tm.UpdateSessionConfig(config)
+	if err == nil {
+		t.Error("Expected error for file path as download directory, but got nil")
+	}
+}
+
+func TestUpdateSessionConfig_NonWritableDirectory(t *testing.T) {
+	tm, err := NewTorrentManager(createTestTorrentManagerConfig())
+	if err != nil {
+		t.Fatalf("Failed to create TorrentManager: %v", err)
+	}
+	defer tm.Close()
+
+	// Create a directory with no write permissions
+	tempDir, err := ioutil.TempDir("", "readonly_test")
+	if err != nil {
+		t.Fatalf("Failed to create temp directory: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	// Make directory read-only
+	err = os.Chmod(tempDir, 0444)
+	if err != nil {
+		t.Fatalf("Failed to make directory read-only: %v", err)
+	}
+
+	config := SessionConfiguration{
+		PeerPort:    6881,
+		DownloadDir: tempDir,
+	}
+
+	err = tm.UpdateSessionConfig(config)
+	if err == nil {
+		t.Error("Expected error for non-writable directory, but got nil")
+	}
+}
+
+func TestUpdateSessionConfig_ConfigurationRevertOnFailure(t *testing.T) {
+	tm, err := NewTorrentManager(createTestTorrentManagerConfig())
+	if err != nil {
+		t.Fatalf("Failed to create TorrentManager: %v", err)
+	}
+	defer tm.Close()
+
+	// Get original configuration
+	tm.sessionMu.RLock()
+	originalConfig := tm.sessionConfig
+	tm.sessionMu.RUnlock()
+
+	// Try to update with an invalid configuration
+	invalidConfig := SessionConfiguration{
+		PeerPort:          6881,
+		DownloadDir:       "/nonexistent/path/that/cannot/be/created",
+		DownloadQueueSize: 10,
+	}
+
+	err = tm.UpdateSessionConfig(invalidConfig)
+	if err == nil {
+		t.Error("Expected error for invalid configuration, but got nil")
+	}
+
+	// Verify configuration was reverted
+	tm.sessionMu.RLock()
+	currentConfig := tm.sessionConfig
+	tm.sessionMu.RUnlock()
+
+	if currentConfig.DownloadDir != originalConfig.DownloadDir {
+		t.Errorf("Configuration was not reverted: expected %s, got %s",
+			originalConfig.DownloadDir, currentConfig.DownloadDir)
+	}
+}
+
+func TestUpdateSessionConfig_QueueDisabling(t *testing.T) {
+	tm, err := NewTorrentManager(createTestTorrentManagerConfig())
+	if err != nil {
+		t.Fatalf("Failed to create TorrentManager: %v", err)
+	}
+	defer tm.Close()
+
+	// First add actual torrents to the manager before adding them to queues
+	torrent1 := &TorrentState{
+		ID:       1,
+		InfoHash: metainfo.NewRandomHash(),
+		Status:   TorrentStatusStopped,
+	}
+	torrent2 := &TorrentState{
+		ID:       2,
+		InfoHash: metainfo.NewRandomHash(),
+		Status:   TorrentStatusStopped,
+	}
+
+	tm.mu.Lock()
+	tm.torrents[1] = torrent1
+	tm.torrents[2] = torrent2
+	tm.mu.Unlock()
+
+	// Add some torrents to queues
+	torrent1ID := int64(1)
+	torrent2ID := int64(2)
+
+	err = tm.queueManager.AddToQueue(torrent1ID, DownloadQueue, 1)
+	if err != nil {
+		t.Fatalf("Failed to add torrent to download queue: %v", err)
+	}
+
+	err = tm.queueManager.AddToQueue(torrent2ID, SeedQueue, 1)
+	if err != nil {
+		t.Fatalf("Failed to add torrent to seed queue: %v", err)
+	}
+
+	// Verify torrents are queued initially (they shouldn't be active yet)
+	if tm.queueManager.IsActive(torrent1ID) {
+		t.Error("Torrent 1 should be queued, not active")
+	}
+	if tm.queueManager.IsActive(torrent2ID) {
+		t.Error("Torrent 2 should be queued, not active")
+	}
+
+	// Disable queues
+	config := SessionConfiguration{
+		PeerPort:             6881,
+		DownloadQueueEnabled: false,
+		SeedQueueEnabled:     false,
+		DownloadQueueSize:    5,
+		SeedQueueSize:        3,
+	}
+
+	err = tm.UpdateSessionConfig(config)
+	if err != nil {
+		t.Fatalf("Failed to update session config: %v", err)
+	}
+
+	// Verify queue configuration was updated
+	tm.queueManager.mu.RLock()
+	queueConfig := tm.queueManager.config
+	tm.queueManager.mu.RUnlock()
+
+	if queueConfig.DownloadQueueEnabled {
+		t.Error("Expected download queue to be disabled")
+	}
+	if queueConfig.SeedQueueEnabled {
+		t.Error("Expected seed queue to be disabled")
+	}
+
+	// Verify torrents were activated (or at least attempt was made)
+	// Since queues are disabled, torrents should either be active or have been processed
+	position1 := tm.queueManager.GetQueuePosition(torrent1ID)
+	position2 := tm.queueManager.GetQueuePosition(torrent2ID)
+
+	// Queue position should be -1 if torrent is not queued
+	if position1 != -1 && !tm.queueManager.IsActive(torrent1ID) {
+		t.Error("Torrent 1 should either be active or not in queue after disabling download queue")
+	}
+	if position2 != -1 && !tm.queueManager.IsActive(torrent2ID) {
+		t.Error("Torrent 2 should either be active or not in queue after disabling seed queue")
+	}
+}
+
+func TestUpdateSessionConfig_QueueLimitUpdates(t *testing.T) {
+	tm, err := NewTorrentManager(createTestTorrentManagerConfig())
+	if err != nil {
+		t.Fatalf("Failed to create TorrentManager: %v", err)
+	}
+	defer tm.Close()
+
+	// Update queue limits
+	config := SessionConfiguration{
+		PeerPort:             6881,
+		DownloadQueueEnabled: true,
+		SeedQueueEnabled:     true,
+		DownloadQueueSize:    15,
+		SeedQueueSize:        10,
+	}
+
+	err = tm.UpdateSessionConfig(config)
+	if err != nil {
+		t.Fatalf("Failed to update session config: %v", err)
+	}
+
+	// Verify queue manager limits were updated
+	tm.queueManager.mu.RLock()
+	queueConfig := tm.queueManager.config
+	tm.queueManager.mu.RUnlock()
+
+	if queueConfig.MaxActiveDownloads != 15 {
+		t.Errorf("Expected max active downloads 15, got %d", queueConfig.MaxActiveDownloads)
+	}
+	if queueConfig.MaxActiveSeeds != 10 {
+		t.Errorf("Expected max active seeds 10, got %d", queueConfig.MaxActiveSeeds)
+	}
+	if !queueConfig.DownloadQueueEnabled {
+		t.Error("Expected download queue to be enabled")
+	}
+	if !queueConfig.SeedQueueEnabled {
+		t.Error("Expected seed queue to be enabled")
+	}
+}

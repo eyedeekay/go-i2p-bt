@@ -388,6 +388,19 @@ func (m *RPCMethods) applyTorrentChanges(torrent *TorrentState, req TorrentActio
 		return fmt.Errorf("failed to initialize file arrays: %v", err)
 	}
 
+	// Apply queue position changes
+	if req.QueuePosition >= 0 {
+		// Only update queue position if the torrent is already in a queue
+		// If not in queue, ignore the position setting (matches Transmission behavior)
+		currentPosition := m.manager.GetTorrentQueuePosition(torrent.ID)
+		if currentPosition >= 0 {
+			if err := m.manager.SetTorrentQueuePosition(torrent.ID, req.QueuePosition); err != nil {
+				return fmt.Errorf("queue position update failed: %v", err)
+			}
+		}
+		// If torrent is not in queue (currentPosition == -1), silently ignore the position setting
+	}
+
 	// Apply bandwidth priority updates
 	m.applyBandwidthPriorityChanges(torrent, req)
 
@@ -1031,11 +1044,15 @@ func (m *RPCMethods) convertTorrentStateToTorrent(state *TorrentState) Torrent {
 	trackers, trackerStats := m.convertTrackerInformation(state)
 	totalSize, completed, percentDone, magnetLink := m.calculateProgressAndMagnet(state, files)
 
+	// Get queue position from the torrent manager
+	queuePosition := m.manager.GetTorrentQueuePosition(state.ID)
+
 	return Torrent{
 		ID:                      state.ID,
 		HashString:              state.InfoHash.HexString(),
 		Name:                    getName(state),
 		Status:                  state.Status,
+		QueuePosition:           queuePosition,
 		AddedDate:               state.AddedDate,
 		StartDate:               state.StartDate,
 		ActivityDate:            getLastActivity(state),
