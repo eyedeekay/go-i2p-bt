@@ -831,8 +831,8 @@ func (m *RPCMethods) SessionGet() (SessionGetResponse, error) {
 		Encryption:                config.Encryption,
 		IdleSeedingLimit:          config.IdleSeedingLimit,
 		IdleSeedingLimitEnabled:   config.IdleSeedingLimitEnabled,
-		IncompleteDir:             "",    // Not implemented
-		IncompleteDirEnabled:      false, // Not implemented
+		IncompleteDir:             config.IncompleteDir,
+		IncompleteDirEnabled:      config.IncompleteDirEnabled,
 		LPD:                       config.LPDEnabled,
 		PeerLimitGlobal:           config.PeerLimitGlobal,
 		PeerLimitPerTorrent:       config.PeerLimitPerTorrent,
@@ -978,10 +978,16 @@ func (m *RPCMethods) updateSeedingSettings(config *SessionConfiguration, req Ses
 }
 
 // updateDirectorySettings updates file system and download directory configurations.
-// This includes download directory paths, cache settings, and torrent startup behavior.
+// This includes download directory paths, incomplete directory settings, cache settings, and torrent startup behavior.
 func (m *RPCMethods) updateDirectorySettings(config *SessionConfiguration, req SessionSetRequest) {
 	if req.DownloadDir != nil {
 		config.DownloadDir = *req.DownloadDir
+	}
+	if req.IncompleteDir != nil {
+		config.IncompleteDir = *req.IncompleteDir
+	}
+	if req.IncompleteDirEnabled != nil {
+		config.IncompleteDirEnabled = *req.IncompleteDirEnabled
 	}
 	if req.CacheSizeMB != nil {
 		config.CacheSizeMB = *req.CacheSizeMB

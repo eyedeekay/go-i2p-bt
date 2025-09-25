@@ -45,6 +45,12 @@ type TorrentManagerConfig struct {
 	// Default download directory
 	DownloadDir string
 
+	// Incomplete directory for downloads in progress (optional)
+	IncompleteDir string
+
+	// Whether to use incomplete directory for downloads
+	IncompleteDirEnabled bool
+
 	// Logger for error reporting
 	ErrorLog func(format string, args ...interface{})
 
@@ -180,6 +186,8 @@ func applyConfigDefaults(config *TorrentManagerConfig) {
 func createDefaultSessionConfig(config TorrentManagerConfig) SessionConfiguration {
 	return SessionConfiguration{
 		DownloadDir:           config.DownloadDir,
+		IncompleteDir:         config.IncompleteDir,
+		IncompleteDirEnabled:  config.IncompleteDirEnabled,
 		PeerPort:              config.PeerPort,
 		PeerLimitGlobal:       config.PeerLimitGlobal,
 		PeerLimitPerTorrent:   config.PeerLimitPerTorrent,
@@ -413,14 +421,27 @@ func (tm *TorrentManager) findDuplicateTorrent(infoHash metainfo.Hash) *TorrentS
 }
 
 // createTorrentState creates a new TorrentState with basic initialization
+// determineDownloadDirectory returns the appropriate download directory based on completion status and configuration
+func (tm *TorrentManager) determineDownloadDirectory(requestedDir string, isComplete bool) string {
+	// Use explicitly requested directory if provided
+	if requestedDir != "" {
+		return requestedDir
+	}
+
+	// If incomplete directory is enabled and torrent is not complete, use incomplete directory
+	if tm.sessionConfig.IncompleteDirEnabled && !isComplete && tm.sessionConfig.IncompleteDir != "" {
+		return tm.sessionConfig.IncompleteDir
+	}
+
+	// Otherwise, use the default download directory
+	return tm.sessionConfig.DownloadDir
+}
+
 func (tm *TorrentManager) createTorrentState(req TorrentAddRequest, metaInfo *metainfo.MetaInfo, infoHash metainfo.Hash) *TorrentState {
 	torrentID := tm.nextID
 	tm.nextID++
 
-	downloadDir := req.DownloadDir
-	if downloadDir == "" {
-		downloadDir = tm.sessionConfig.DownloadDir
-	}
+	downloadDir := tm.determineDownloadDirectory(req.DownloadDir, false) // false = not complete yet
 
 	return &TorrentState{
 		ID:                  torrentID,
@@ -703,6 +724,13 @@ func (tm *TorrentManager) UpdateSessionConfig(config SessionConfiguration) error
 		}
 	}
 
+	// Validate and create incomplete directory if enabled and specified
+	if config.IncompleteDirEnabled && config.IncompleteDir != "" {
+		if err := tm.validateAndCreateDownloadDir(config.IncompleteDir); err != nil {
+			return fmt.Errorf("invalid incomplete directory: %w", err)
+		}
+	}
+
 	// Store previous configuration for comparison
 	oldConfig := tm.sessionConfig
 	tm.sessionConfig = config
@@ -767,6 +795,14 @@ func (tm *TorrentManager) applyRuntimeConfigChanges(oldConfig, newConfig Session
 	if oldConfig.DownloadDir != newConfig.DownloadDir && newConfig.DownloadDir != "" {
 		if err := tm.updateDownloadDirectory(newConfig.DownloadDir); err != nil {
 			return fmt.Errorf("failed to update download directory: %w", err)
+		}
+	}
+
+	// Update incomplete directory settings if changed
+	if oldConfig.IncompleteDir != newConfig.IncompleteDir ||
+		oldConfig.IncompleteDirEnabled != newConfig.IncompleteDirEnabled {
+		if err := tm.updateIncompleteDirConfiguration(oldConfig, newConfig); err != nil {
+			return fmt.Errorf("failed to update incomplete directory configuration: %w", err)
 		}
 	}
 
@@ -868,6 +904,30 @@ func (tm *TorrentManager) updateSpeedLimits(config SessionConfiguration) {
 		config.SpeedLimitUp, config.SpeedLimitUpEnabled)
 
 	tm.log("Bandwidth manager: %s", tm.bandwidthManager.String())
+}
+
+// updateIncompleteDirConfiguration updates incomplete directory settings and handles migrations
+func (tm *TorrentManager) updateIncompleteDirConfiguration(oldConfig, newConfig SessionConfiguration) error {
+	tm.mu.RLock()
+	defer tm.mu.RUnlock()
+
+	// Update the base configuration
+	tm.config.IncompleteDir = newConfig.IncompleteDir
+	tm.config.IncompleteDirEnabled = newConfig.IncompleteDirEnabled
+
+	// Log the configuration change
+	if newConfig.IncompleteDirEnabled {
+		tm.log("Incomplete directory enabled: %s", newConfig.IncompleteDir)
+	} else {
+		tm.log("Incomplete directory disabled")
+	}
+
+	// Note: For this initial implementation, we don't automatically move existing torrents
+	// between directories. This would require file management operations that are better
+	// handled explicitly by users or through separate file management functionality.
+	// Future enhancement: Add automatic file migration when changing incomplete directory settings.
+
+	return nil
 }
 
 // Queue Management Methods

@@ -490,10 +490,12 @@ type PeerInfo struct {
 // SessionConfiguration represents the global session configuration
 type SessionConfiguration struct {
 	// Basic settings
-	DownloadDir         string `json:"download_dir"`
-	PeerPort            int64  `json:"peer_port"`
-	PeerLimitGlobal     int64  `json:"peer_limit_global"`
-	PeerLimitPerTorrent int64  `json:"peer_limit_per_torrent"`
+	DownloadDir          string `json:"download_dir"`
+	IncompleteDir        string `json:"incomplete_dir"`
+	IncompleteDirEnabled bool   `json:"incomplete_dir_enabled"`
+	PeerPort             int64  `json:"peer_port"`
+	PeerLimitGlobal      int64  `json:"peer_limit_global"`
+	PeerLimitPerTorrent  int64  `json:"peer_limit_per_torrent"`
 
 	// Protocol settings
 	DHTEnabled bool   `json:"dht_enabled"`

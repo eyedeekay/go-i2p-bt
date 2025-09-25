@@ -6,6 +6,7 @@ import (
 	"io/ioutil"
 	"net"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -1370,3 +1371,348 @@ func TestUpdateSessionConfig_QueueLimitUpdates(t *testing.T) {
 		t.Error("Expected seed queue to be enabled")
 	}
 }
+
+// Test incomplete directory configuration
+func TestIncompleteDirConfiguration(t *testing.T) {
+	config := createTestTorrentManagerConfig()
+
+	// Set up incomplete directory configuration
+	config.IncompleteDir = "/tmp/test_incomplete"
+	config.IncompleteDirEnabled = true
+	config.SessionConfig.IncompleteDir = "/tmp/test_incomplete"
+	config.SessionConfig.IncompleteDirEnabled = true
+
+	tm, err := NewTorrentManager(config)
+	if err != nil {
+		t.Fatalf("Failed to create TorrentManager: %v", err)
+	}
+	defer func() {
+		tm.Close()
+		os.RemoveAll("/tmp/test_incomplete")
+		os.RemoveAll("test_downloads")
+	}()
+
+	// Test that configuration is set correctly
+	sessionConfig := tm.GetSessionConfig()
+	if sessionConfig.IncompleteDir != "/tmp/test_incomplete" {
+		t.Errorf("Expected incomplete dir '/tmp/test_incomplete', got '%s'", sessionConfig.IncompleteDir)
+	}
+	if !sessionConfig.IncompleteDirEnabled {
+		t.Error("Expected incomplete directory to be enabled")
+	}
+}
+
+// Test determineDownloadDirectory method
+func TestDetermineDownloadDirectory(t *testing.T) {
+	config := createTestTorrentManagerConfig()
+	config.DownloadDir = "/tmp/test_complete"
+	config.IncompleteDir = "/tmp/test_incomplete"
+	config.IncompleteDirEnabled = true
+	config.SessionConfig.DownloadDir = "/tmp/test_complete"
+	config.SessionConfig.IncompleteDir = "/tmp/test_incomplete"
+	config.SessionConfig.IncompleteDirEnabled = true
+
+	tm, err := NewTorrentManager(config)
+	if err != nil {
+		t.Fatalf("Failed to create TorrentManager: %v", err)
+	}
+	defer func() {
+		tm.Close()
+		os.RemoveAll("/tmp/test_complete")
+		os.RemoveAll("/tmp/test_incomplete")
+	}()
+
+	tests := []struct {
+		name         string
+		requestedDir string
+		isComplete   bool
+		expected     string
+	}{
+		{
+			name:         "Explicit directory override",
+			requestedDir: "/explicit/path",
+			isComplete:   false,
+			expected:     "/explicit/path",
+		},
+		{
+			name:         "Incomplete torrent uses incomplete dir",
+			requestedDir: "",
+			isComplete:   false,
+			expected:     "/tmp/test_incomplete",
+		},
+		{
+			name:         "Complete torrent uses complete dir",
+			requestedDir: "",
+			isComplete:   true,
+			expected:     "/tmp/test_complete",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := tm.determineDownloadDirectory(tt.requestedDir, tt.isComplete)
+			if result != tt.expected {
+				t.Errorf("Expected directory '%s', got '%s'", tt.expected, result)
+			}
+		})
+	}
+}
+
+// Test session configuration updates for incomplete directory
+func TestUpdateIncompleteDirSessionConfig(t *testing.T) {
+	config := createTestTorrentManagerConfig()
+	tm, err := NewTorrentManager(config)
+	if err != nil {
+		t.Fatalf("Failed to create TorrentManager: %v", err)
+	}
+	defer func() {
+		tm.Close()
+		os.RemoveAll("/tmp/test_incomplete_updated")
+		os.RemoveAll("test_downloads")
+	}()
+
+	// Update session configuration with incomplete directory
+	sessionConfig := tm.GetSessionConfig()
+	sessionConfig.IncompleteDir = "/tmp/test_incomplete_updated"
+	sessionConfig.IncompleteDirEnabled = true
+
+	err = tm.UpdateSessionConfig(sessionConfig)
+	if err != nil {
+		t.Fatalf("Failed to update session config: %v", err)
+	}
+
+	// Verify changes were applied
+	updatedConfig := tm.GetSessionConfig()
+	if updatedConfig.IncompleteDir != "/tmp/test_incomplete_updated" {
+		t.Errorf("Expected incomplete dir '/tmp/test_incomplete_updated', got '%s'", updatedConfig.IncompleteDir)
+	}
+	if !updatedConfig.IncompleteDirEnabled {
+		t.Error("Expected incomplete directory to be enabled")
+	}
+
+	// Verify base config was updated too
+	if tm.config.IncompleteDir != "/tmp/test_incomplete_updated" {
+		t.Errorf("Expected base config incomplete dir '/tmp/test_incomplete_updated', got '%s'", tm.config.IncompleteDir)
+	}
+	if !tm.config.IncompleteDirEnabled {
+		t.Error("Expected base config incomplete directory to be enabled")
+	}
+}
+
+// Test incomplete directory validation
+func TestIncompleteDirValidation(t *testing.T) {
+	config := createTestTorrentManagerConfig()
+	tm, err := NewTorrentManager(config)
+	if err != nil {
+		t.Fatalf("Failed to create TorrentManager: %v", err)
+	}
+	defer func() {
+		tm.Close()
+		os.RemoveAll("test_downloads")
+	}()
+
+	tests := []struct {
+		name             string
+		incompleteDir    string
+		enabled          bool
+		shouldCreateDir  bool
+		shouldError      bool
+		errorContains    string
+	}{
+		{
+			name:            "Valid directory path",
+			incompleteDir:   "/tmp/test_valid_incomplete",
+			enabled:         true,
+			shouldCreateDir: true,
+			shouldError:     false,
+		},
+		{
+			name:          "Disabled incomplete directory",
+			incompleteDir: "",
+			enabled:       false,
+			shouldError:   false,
+		},
+		{
+			name:          "Empty path with enabled flag",
+			incompleteDir: "",
+			enabled:       true,
+			shouldError:   false, // Empty path should be okay when enabled
+		},
+		{
+			name:          "Invalid path - file exists",
+			incompleteDir: "/dev/null", // This is a file, not a directory
+			enabled:       true,
+			shouldError:   true,
+			errorContains: "not a directory",
+		},
+	}
+
+	// Create test file for "file exists" test
+	defer os.RemoveAll("/tmp/test_valid_incomplete")
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sessionConfig := tm.GetSessionConfig()
+			sessionConfig.IncompleteDir = tt.incompleteDir
+			sessionConfig.IncompleteDirEnabled = tt.enabled
+
+			err := tm.UpdateSessionConfig(sessionConfig)
+
+			if tt.shouldError {
+				if err == nil {
+					t.Errorf("Expected error but got none")
+				} else if tt.errorContains != "" && !strings.Contains(err.Error(), tt.errorContains) {
+					t.Errorf("Expected error to contain '%s', got: %s", tt.errorContains, err.Error())
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Unexpected error: %v", err)
+				}
+
+				if tt.shouldCreateDir && tt.incompleteDir != "" {
+					// Check if directory was created
+					if _, err := os.Stat(tt.incompleteDir); os.IsNotExist(err) {
+						t.Errorf("Expected directory to be created: %s", tt.incompleteDir)
+					}
+				}
+			}
+		})
+	}
+}
+
+// Test torrent creation uses correct directory
+func TestTorrentCreationWithIncompleteDir(t *testing.T) {
+	config := createTestTorrentManagerConfig()
+	config.DownloadDir = "/tmp/test_complete_dir"
+	config.IncompleteDir = "/tmp/test_incomplete_dir"
+	config.IncompleteDirEnabled = true
+	config.SessionConfig.DownloadDir = "/tmp/test_complete_dir"
+	config.SessionConfig.IncompleteDir = "/tmp/test_incomplete_dir"
+	config.SessionConfig.IncompleteDirEnabled = true
+
+	tm, err := NewTorrentManager(config)
+	if err != nil {
+		t.Fatalf("Failed to create TorrentManager: %v", err)
+	}
+	defer func() {
+		tm.Close()
+		os.RemoveAll("/tmp/test_complete_dir")
+		os.RemoveAll("/tmp/test_incomplete_dir")
+	}()
+
+	// Create a test torrent
+	req := TorrentAddRequest{
+		Filename: "test.torrent",
+		Metainfo: base64.StdEncoding.EncodeToString(createTestMetainfoBytes(t)),
+		Paused:   true,
+	}
+
+	torrent, err := tm.AddTorrent(req)
+	if err != nil {
+		t.Fatalf("Failed to add torrent: %v", err)
+	}
+
+	// Verify torrent was created with incomplete directory
+	if torrent.DownloadDir != "/tmp/test_incomplete_dir" {
+		t.Errorf("Expected download dir '/tmp/test_incomplete_dir', got '%s'", torrent.DownloadDir)
+	}
+}
+
+// Test that explicit download directory overrides incomplete directory
+func TestExplicitDownloadDirOverridesIncomplete(t *testing.T) {
+	config := createTestTorrentManagerConfig()
+	config.IncompleteDir = "/tmp/test_incomplete_override"
+	config.IncompleteDirEnabled = true
+	config.SessionConfig.IncompleteDir = "/tmp/test_incomplete_override"
+	config.SessionConfig.IncompleteDirEnabled = true
+
+	tm, err := NewTorrentManager(config)
+	if err != nil {
+		t.Fatalf("Failed to create TorrentManager: %v", err)
+	}
+	defer func() {
+		tm.Close()
+		os.RemoveAll("/tmp/test_incomplete_override")
+		os.RemoveAll("/tmp/test_explicit_override")
+		os.RemoveAll("test_downloads")
+	}()
+
+	// Create a test torrent with explicit download directory
+	req := TorrentAddRequest{
+		Filename:    "test.torrent",
+		DownloadDir: "/tmp/test_explicit_override",
+		Metainfo:    base64.StdEncoding.EncodeToString(createTestMetainfoBytes(t)),
+		Paused:      true,
+	}
+
+	torrent, err := tm.AddTorrent(req)
+	if err != nil {
+		t.Fatalf("Failed to add torrent: %v", err)
+	}
+
+	// Verify torrent uses explicit directory, not incomplete directory
+	if torrent.DownloadDir != "/tmp/test_explicit_override" {
+		t.Errorf("Expected download dir '/tmp/test_explicit_override', got '%s'", torrent.DownloadDir)
+	}
+}
+
+// Test session-set method with incomplete directory settings
+func TestSessionSetWithIncompleteDir(t *testing.T) {
+	config := createTestTorrentManagerConfig()
+	tm, err := NewTorrentManager(config)
+	if err != nil {
+		t.Fatalf("Failed to create TorrentManager: %v", err)
+	}
+	defer func() {
+		tm.Close()
+		os.RemoveAll("/tmp/test_session_set_incomplete")
+		os.RemoveAll("test_downloads")
+	}()
+
+	// Create RPC methods instance
+	methods := &RPCMethods{manager: tm}
+
+	// Test session-set with incomplete directory settings
+	req := SessionSetRequest{
+		IncompleteDir:        stringPtr("/tmp/test_session_set_incomplete"),
+		IncompleteDirEnabled: boolPtr(true),
+	}
+
+	err = methods.SessionSet(req)
+	if err != nil {
+		t.Fatalf("Failed to set session configuration: %v", err)
+	}
+
+	// Verify the configuration was applied
+	sessionConfig := tm.GetSessionConfig()
+	if sessionConfig.IncompleteDir != "/tmp/test_session_set_incomplete" {
+		t.Errorf("Expected incomplete dir '/tmp/test_session_set_incomplete', got '%s'", sessionConfig.IncompleteDir)
+	}
+	if !sessionConfig.IncompleteDirEnabled {
+		t.Error("Expected incomplete directory to be enabled")
+	}
+
+	// Test session-get returns the correct values
+	response, err := methods.SessionGet()
+	if err != nil {
+		t.Fatalf("Failed to get session configuration: %v", err)
+	}
+
+	if response.IncompleteDir != "/tmp/test_session_set_incomplete" {
+		t.Errorf("SessionGet: Expected incomplete dir '/tmp/test_session_set_incomplete', got '%s'", response.IncompleteDir)
+	}
+	if !response.IncompleteDirEnabled {
+		t.Error("SessionGet: Expected incomplete directory to be enabled")
+	}
+}
+
+// Helper functions for creating pointers to primitive types
+func stringPtr(s string) *string {
+	return &s
+}
+
+func boolPtr(b bool) *bool {
+	return &b
+}
+
+
