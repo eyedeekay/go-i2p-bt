@@ -1110,20 +1110,20 @@ func (tm *TorrentManager) updateTorrentPeers(torrent *TorrentState, peers []meta
 	// Update peer information - convert metainfo.Address to PeerInfo and deduplicate
 	newPeers := make([]PeerInfo, 0, len(peers))
 	newPeerKeys := make(map[string]bool)
-	
+
 	for _, peer := range peers {
 		// Check if peer is blocked by the blocklist
 		if tm.blocklistManager.IsBlocked(peer.IP.String()) {
 			tm.log("Blocked peer %s:%d by blocklist", peer.IP.String(), peer.Port)
 			continue
 		}
-		
+
 		// Check for duplicates within new peers
 		key := fmt.Sprintf("%s:%d", peer.IP.String(), peer.Port)
 		if newPeerKeys[key] {
 			continue // Skip duplicate
 		}
-		
+
 		peerInfo := PeerInfo{
 			Address:   peer.IP.String(),
 			Port:      int64(peer.Port),
@@ -1131,7 +1131,7 @@ func (tm *TorrentManager) updateTorrentPeers(torrent *TorrentState, peers []meta
 		}
 		newPeers = append(newPeers, peerInfo)
 		newPeerKeys[key] = true
-	}	// Add new peers to existing list (avoiding duplicates in a simple way)
+	} // Add new peers to existing list (avoiding duplicates in a simple way)
 	existingAddrs := make(map[string]bool)
 	for _, existing := range torrent.Peers {
 		key := fmt.Sprintf("%s:%d", existing.Address, existing.Port)
