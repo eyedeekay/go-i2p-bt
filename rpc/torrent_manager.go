@@ -191,9 +191,9 @@ func applyConfigDefaults(config *TorrentManagerConfig) {
 		// Preserve any existing blocklist settings
 		existingBlocklistEnabled := config.SessionConfig.BlocklistEnabled
 		existingBlocklistURL := config.SessionConfig.BlocklistURL
-		
+
 		config.SessionConfig = createDefaultSessionConfig(*config)
-		
+
 		// Restore blocklist settings
 		config.SessionConfig.BlocklistEnabled = existingBlocklistEnabled
 		config.SessionConfig.BlocklistURL = existingBlocklistURL
@@ -1107,24 +1107,31 @@ func (tm *TorrentManager) updateTorrentPeers(torrent *TorrentState, peers []meta
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 
-	// Update peer information - convert metainfo.Address to PeerInfo
+	// Update peer information - convert metainfo.Address to PeerInfo and deduplicate
 	newPeers := make([]PeerInfo, 0, len(peers))
+	newPeerKeys := make(map[string]bool)
+	
 	for _, peer := range peers {
 		// Check if peer is blocked by the blocklist
 		if tm.blocklistManager.IsBlocked(peer.IP.String()) {
 			tm.log("Blocked peer %s:%d by blocklist", peer.IP.String(), peer.Port)
 			continue
 		}
-
+		
+		// Check for duplicates within new peers
+		key := fmt.Sprintf("%s:%d", peer.IP.String(), peer.Port)
+		if newPeerKeys[key] {
+			continue // Skip duplicate
+		}
+		
 		peerInfo := PeerInfo{
 			Address:   peer.IP.String(),
 			Port:      int64(peer.Port),
 			Direction: "outgoing", // We're connecting to them
 		}
 		newPeers = append(newPeers, peerInfo)
-	}
-
-	// Add new peers to existing list (avoiding duplicates in a simple way)
+		newPeerKeys[key] = true
+	}	// Add new peers to existing list (avoiding duplicates in a simple way)
 	existingAddrs := make(map[string]bool)
 	for _, existing := range torrent.Peers {
 		key := fmt.Sprintf("%s:%d", existing.Address, existing.Port)

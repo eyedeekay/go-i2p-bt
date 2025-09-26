@@ -222,7 +222,7 @@ func TestBlocklistManager_parseBlocklist_PlainTextIPs(t *testing.T) {
 
 	// Check that all are single IP ranges - ranges are sorted, so we need to find them
 	expectedIPs := map[string]bool{"192.168.1.100": false, "10.0.0.1": false, "8.8.8.8": false}
-	
+
 	for _, r := range ranges {
 		ipStr := r.start.String()
 		if found, exists := expectedIPs[ipStr]; exists {
@@ -237,7 +237,7 @@ func TestBlocklistManager_parseBlocklist_PlainTextIPs(t *testing.T) {
 			t.Errorf("Unexpected IP range found: %s", ipStr)
 		}
 	}
-	
+
 	// Verify all expected IPs were found
 	for ip, found := range expectedIPs {
 		if !found {
@@ -264,7 +264,7 @@ func TestBlocklistManager_parseBlocklist_CIDR(t *testing.T) {
 	// Find the ranges - they are sorted so we need to identify them by content
 	found192 := false
 	found10 := false
-	
+
 	for _, r := range ranges {
 		startStr := r.start.String()
 		if startStr == "192.168.1.0" {
@@ -279,7 +279,7 @@ func TestBlocklistManager_parseBlocklist_CIDR(t *testing.T) {
 			}
 		}
 	}
-	
+
 	if !found192 {
 		t.Error("192.168.1.0/24 range not found")
 	}
@@ -306,7 +306,7 @@ Bad Peer Network:10.0.0.1-10.0.0.100`
 	// Find the ranges by their start IPs
 	found192 := false
 	found10 := false
-	
+
 	for _, r := range ranges {
 		startStr := r.start.String()
 		if startStr == "192.168.1.1" {
@@ -321,7 +321,7 @@ Bad Peer Network:10.0.0.1-10.0.0.100`
 			}
 		}
 	}
-	
+
 	if !found192 {
 		t.Error("192.168.1.1-255 range not found")
 	}
