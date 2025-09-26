@@ -79,6 +79,7 @@ type TorrentManager struct {
 	queueManager     *QueueManager
 	bandwidthManager *BandwidthManager
 	blocklistManager *BlocklistManager
+	scriptManager    *ScriptManager
 
 	// Thread-safe torrent storage
 	mu       sync.RWMutex
@@ -144,6 +145,11 @@ func NewTorrentManager(config TorrentManagerConfig) (*TorrentManager, error) {
 			tm.log("Blocklist initialization warning: %v", err)
 		}
 	}
+
+	// Initialize script manager with session configuration
+	tm.scriptManager = NewScriptManager()
+	tm.scriptManager.SetLogger(tm.log)
+	tm.updateScriptConfiguration(config.SessionConfig)
 
 	// Initialize DHT server if enabled
 	if err := tm.initializeDHTServer(); err != nil {
@@ -952,6 +958,22 @@ func (tm *TorrentManager) updateBlocklistConfiguration(config SessionConfigurati
 		config.BlocklistEnabled, config.BlocklistURL, tm.blocklistManager.GetSize())
 
 	return nil
+}
+
+// updateScriptConfiguration updates script hook settings for lifecycle events
+func (tm *TorrentManager) updateScriptConfiguration(config SessionConfiguration) {
+	// Update torrent-done script hook
+	tm.scriptManager.UpdateHookConfig(ScriptHookTorrentDone, &ScriptHookConfig{
+		Enabled:  config.ScriptTorrentDoneEnabled,
+		Filename: config.ScriptTorrentDoneFilename,
+		Timeout:  30 * time.Second, // Default timeout
+		Environment: map[string]string{
+			// Additional environment variables can be added here
+		},
+	})
+
+	tm.log("Script configuration updated: torrent-done enabled=%t, filename=%s",
+		config.ScriptTorrentDoneEnabled, config.ScriptTorrentDoneFilename)
 }
 
 // updateIncompleteDirConfiguration updates incomplete directory settings and handles migrations

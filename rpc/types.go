@@ -536,6 +536,10 @@ type SessionConfiguration struct {
 	BlocklistEnabled bool   `json:"blocklist_enabled"`
 	BlocklistURL     string `json:"blocklist_url"`
 	BlocklistSize    int64  `json:"blocklist_size"`
+
+	// Script hook settings
+	ScriptTorrentDoneEnabled  bool   `json:"script_torrent_done_enabled"`
+	ScriptTorrentDoneFilename string `json:"script_torrent_done_filename"`
 }
 
 // Helper methods for JSON marshaling with custom time format
