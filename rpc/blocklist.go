@@ -23,11 +23,11 @@ type BlocklistManager struct {
 	lastModified string
 	etag         string
 	lastUpdated  time.Time
-	
+
 	// IP ranges for efficient lookup
 	ipRanges []ipRange
 	size     int64
-	
+
 	// HTTP client for fetching blocklists
 	httpClient *http.Client
 }
@@ -65,15 +65,15 @@ func (bm *BlocklistManager) IsEnabled() bool {
 func (bm *BlocklistManager) SetURL(url string) error {
 	bm.mu.Lock()
 	defer bm.mu.Unlock()
-	
+
 	if bm.url == url {
 		return nil // No change
 	}
-	
+
 	bm.url = url
 	bm.lastModified = ""
 	bm.etag = ""
-	
+
 	// If enabled, trigger an immediate update
 	if bm.enabled && url != "" {
 		go func() {
@@ -83,7 +83,7 @@ func (bm *BlocklistManager) SetURL(url string) error {
 			}
 		}()
 	}
-	
+
 	return nil
 }
 
@@ -106,22 +106,22 @@ func (bm *BlocklistManager) IsBlocked(ip string) bool {
 	if !bm.IsEnabled() {
 		return false
 	}
-	
+
 	parsedIP := net.ParseIP(ip)
 	if parsedIP == nil {
 		return true // Block invalid IPs
 	}
-	
+
 	bm.mu.RLock()
 	defer bm.mu.RUnlock()
-	
+
 	// Binary search through sorted IP ranges
 	for _, ipRange := range bm.ipRanges {
 		if bm.ipInRange(parsedIP, ipRange) {
 			return true
 		}
 	}
-	
+
 	return false
 }
 
@@ -133,30 +133,30 @@ func (bm *BlocklistManager) Update() error {
 	lastModified := bm.lastModified
 	etag := bm.etag
 	bm.mu.Unlock()
-	
+
 	if url == "" {
 		return fmt.Errorf("no blocklist URL configured")
 	}
-	
+
 	// Create HTTP request with caching headers
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
-	
+
 	if lastModified != "" {
 		req.Header.Set("If-Modified-Since", lastModified)
 	}
 	if etag != "" {
 		req.Header.Set("If-None-Match", etag)
 	}
-	
+
 	resp, err := bm.httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("failed to fetch blocklist: %w", err)
 	}
 	defer resp.Body.Close()
-	
+
 	// Handle not modified
 	if resp.StatusCode == http.StatusNotModified {
 		bm.mu.Lock()
@@ -164,17 +164,17 @@ func (bm *BlocklistManager) Update() error {
 		bm.mu.Unlock()
 		return nil
 	}
-	
+
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 	}
-	
+
 	// Parse the blocklist
 	ranges, err := bm.parseBlocklist(resp.Body)
 	if err != nil {
 		return fmt.Errorf("failed to parse blocklist: %w", err)
 	}
-	
+
 	// Update the blocklist atomically
 	bm.mu.Lock()
 	bm.ipRanges = ranges
@@ -183,7 +183,7 @@ func (bm *BlocklistManager) Update() error {
 	bm.lastUpdated = time.Now()
 	atomic.StoreInt64(&bm.size, int64(len(ranges)))
 	bm.mu.Unlock()
-	
+
 	return nil
 }
 
@@ -192,13 +192,13 @@ func (bm *BlocklistManager) Update() error {
 func (bm *BlocklistManager) parseBlocklist(r io.Reader) ([]ipRange, error) {
 	var ranges []ipRange
 	scanner := bufio.NewScanner(r)
-	
+
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		
+
 		// Try to parse as CIDR first
 		if strings.Contains(line, "/") {
 			_, cidr, err := net.ParseCIDR(line)
@@ -208,7 +208,7 @@ func (bm *BlocklistManager) parseBlocklist(r io.Reader) ([]ipRange, error) {
 				continue
 			}
 		}
-		
+
 		// Try to parse as DAT format (name:start-end)
 		if strings.Contains(line, ":") && strings.Contains(line, "-") {
 			parts := strings.SplitN(line, ":", 2)
@@ -227,23 +227,23 @@ func (bm *BlocklistManager) parseBlocklist(r io.Reader) ([]ipRange, error) {
 				}
 			}
 		}
-		
+
 		// Try to parse as single IP
 		ip := net.ParseIP(line)
 		if ip != nil {
 			ranges = append(ranges, ipRange{start: ip, end: ip})
 		}
 	}
-	
+
 	if err := scanner.Err(); err != nil {
 		return nil, err
 	}
-	
+
 	// Sort ranges for efficient lookup
 	sort.Slice(ranges, func(i, j int) bool {
 		return bm.compareIPs(ranges[i].start, ranges[j].start) < 0
 	})
-	
+
 	return ranges, nil
 }
 
@@ -252,7 +252,7 @@ func (bm *BlocklistManager) cidrToRange(cidr *net.IPNet) (net.IP, net.IP) {
 	start := cidr.IP
 	end := make(net.IP, len(start))
 	copy(end, start)
-	
+
 	// Calculate the end IP by ORing with the inverted mask
 	mask := cidr.Mask
 	for i := 0; i < len(end); i++ {
@@ -260,7 +260,7 @@ func (bm *BlocklistManager) cidrToRange(cidr *net.IPNet) (net.IP, net.IP) {
 			end[i] |= ^mask[i]
 		}
 	}
-	
+
 	return start, end
 }
 
@@ -280,7 +280,7 @@ func (bm *BlocklistManager) ipInRange(ip net.IP, r ipRange) bool {
 			return false
 		}
 	}
-	
+
 	return bm.compareIPs(ip, r.start) >= 0 && bm.compareIPs(ip, r.end) <= 0
 }
 
@@ -295,7 +295,7 @@ func (bm *BlocklistManager) compareIPs(a, b net.IP) int {
 			b = b.To16()
 		}
 	}
-	
+
 	for i := 0; i < len(a) && i < len(b); i++ {
 		if a[i] < b[i] {
 			return -1
@@ -304,14 +304,14 @@ func (bm *BlocklistManager) compareIPs(a, b net.IP) int {
 			return 1
 		}
 	}
-	
+
 	if len(a) < len(b) {
 		return -1
 	}
 	if len(a) > len(b) {
 		return 1
 	}
-	
+
 	return 0
 }
 

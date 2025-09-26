@@ -188,7 +188,15 @@ func applyConfigDefaults(config *TorrentManagerConfig) {
 
 	// Set default session configuration if not provided
 	if config.SessionConfig.Version == "" {
+		// Preserve any existing blocklist settings
+		existingBlocklistEnabled := config.SessionConfig.BlocklistEnabled
+		existingBlocklistURL := config.SessionConfig.BlocklistURL
+		
 		config.SessionConfig = createDefaultSessionConfig(*config)
+		
+		// Restore blocklist settings
+		config.SessionConfig.BlocklistEnabled = existingBlocklistEnabled
+		config.SessionConfig.BlocklistURL = existingBlocklistURL
 	}
 }
 
@@ -701,7 +709,7 @@ func (tm *TorrentManager) GetSessionConfig() SessionConfiguration {
 	config := tm.sessionConfig
 	// Update blocklist size from current manager state
 	config.BlocklistSize = tm.blocklistManager.GetSize()
-	
+
 	return config
 }
 
@@ -932,17 +940,17 @@ func (tm *TorrentManager) updateSpeedLimits(config SessionConfiguration) {
 func (tm *TorrentManager) updateBlocklistConfiguration(config SessionConfiguration) error {
 	// Update blocklist enabled status
 	tm.blocklistManager.SetEnabled(config.BlocklistEnabled)
-	
+
 	// Update blocklist URL if changed
 	if config.BlocklistURL != "" {
 		if err := tm.blocklistManager.SetURL(config.BlocklistURL); err != nil {
 			return fmt.Errorf("failed to set blocklist URL: %w", err)
 		}
 	}
-	
+
 	tm.log("Blocklist configuration updated: enabled=%t, url=%s, size=%d",
 		config.BlocklistEnabled, config.BlocklistURL, tm.blocklistManager.GetSize())
-	
+
 	return nil
 }
 
@@ -1107,7 +1115,7 @@ func (tm *TorrentManager) updateTorrentPeers(torrent *TorrentState, peers []meta
 			tm.log("Blocked peer %s:%d by blocklist", peer.IP.String(), peer.Port)
 			continue
 		}
-		
+
 		peerInfo := PeerInfo{
 			Address:   peer.IP.String(),
 			Port:      int64(peer.Port),
