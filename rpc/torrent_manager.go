@@ -78,6 +78,7 @@ type TorrentManager struct {
 	downloader       *downloader.TorrentDownloader
 	queueManager     *QueueManager
 	bandwidthManager *BandwidthManager
+	blocklistManager *BlocklistManager
 
 	// Thread-safe torrent storage
 	mu       sync.RWMutex
@@ -134,6 +135,15 @@ func NewTorrentManager(config TorrentManagerConfig) (*TorrentManager, error) {
 
 	// Initialize bandwidth manager with session configuration
 	tm.bandwidthManager = NewBandwidthManager(config.SessionConfig)
+
+	// Initialize blocklist manager with session configuration
+	tm.blocklistManager = NewBlocklistManager()
+	tm.blocklistManager.SetEnabled(config.SessionConfig.BlocklistEnabled)
+	if config.SessionConfig.BlocklistURL != "" {
+		if err := tm.blocklistManager.SetURL(config.SessionConfig.BlocklistURL); err != nil {
+			tm.log("Blocklist initialization warning: %v", err)
+		}
+	}
 
 	// Initialize DHT server if enabled
 	if err := tm.initializeDHTServer(); err != nil {
@@ -688,7 +698,11 @@ func (tm *TorrentManager) GetSessionConfig() SessionConfiguration {
 	tm.sessionMu.RLock()
 	defer tm.sessionMu.RUnlock()
 
-	return tm.sessionConfig
+	config := tm.sessionConfig
+	// Update blocklist size from current manager state
+	config.BlocklistSize = tm.blocklistManager.GetSize()
+	
+	return config
 }
 
 // UpdateSessionConfig updates the session configuration
@@ -820,6 +834,14 @@ func (tm *TorrentManager) applyRuntimeConfigChanges(oldConfig, newConfig Session
 		tm.updateSpeedLimits(newConfig)
 	}
 
+	// Update blocklist configuration if changed
+	if oldConfig.BlocklistEnabled != newConfig.BlocklistEnabled ||
+		oldConfig.BlocklistURL != newConfig.BlocklistURL {
+		if err := tm.updateBlocklistConfiguration(newConfig); err != nil {
+			return fmt.Errorf("failed to update blocklist configuration: %w", err)
+		}
+	}
+
 	return nil
 }
 
@@ -904,6 +926,24 @@ func (tm *TorrentManager) updateSpeedLimits(config SessionConfiguration) {
 		config.SpeedLimitUp, config.SpeedLimitUpEnabled)
 
 	tm.log("Bandwidth manager: %s", tm.bandwidthManager.String())
+}
+
+// updateBlocklistConfiguration updates blocklist settings and triggers URL refresh if needed
+func (tm *TorrentManager) updateBlocklistConfiguration(config SessionConfiguration) error {
+	// Update blocklist enabled status
+	tm.blocklistManager.SetEnabled(config.BlocklistEnabled)
+	
+	// Update blocklist URL if changed
+	if config.BlocklistURL != "" {
+		if err := tm.blocklistManager.SetURL(config.BlocklistURL); err != nil {
+			return fmt.Errorf("failed to set blocklist URL: %w", err)
+		}
+	}
+	
+	tm.log("Blocklist configuration updated: enabled=%t, url=%s, size=%d",
+		config.BlocklistEnabled, config.BlocklistURL, tm.blocklistManager.GetSize())
+	
+	return nil
 }
 
 // updateIncompleteDirConfiguration updates incomplete directory settings and handles migrations
@@ -1062,6 +1102,12 @@ func (tm *TorrentManager) updateTorrentPeers(torrent *TorrentState, peers []meta
 	// Update peer information - convert metainfo.Address to PeerInfo
 	newPeers := make([]PeerInfo, 0, len(peers))
 	for _, peer := range peers {
+		// Check if peer is blocked by the blocklist
+		if tm.blocklistManager.IsBlocked(peer.IP.String()) {
+			tm.log("Blocked peer %s:%d by blocklist", peer.IP.String(), peer.Port)
+			continue
+		}
+		
 		peerInfo := PeerInfo{
 			Address:   peer.IP.String(),
 			Port:      int64(peer.Port),
