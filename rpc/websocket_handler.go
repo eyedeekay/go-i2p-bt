@@ -306,60 +306,82 @@ func (h *WebSocketHandler) handleClient(client *WebSocketClient) {
 func (h *WebSocketHandler) processClientMessage(client *WebSocketClient, msg WebSocketMessage) {
 	switch msg.Type {
 	case "subscribe":
-		// Handle subscription requests
-		if subscription, ok := msg.Data.(string); ok {
-			client.subscriptionsMu.Lock()
-			client.subscriptions[subscription] = true
-			client.subscriptionsMu.Unlock()
-
-			// Send confirmation
-			response := WebSocketMessage{
-				Type: "subscribed",
-				Data: subscription,
-				ID:   msg.ID,
-			}
-			select {
-			case client.send <- response:
-			default:
-				// Client send buffer is full, skip
-			}
-		}
-
+		h.handleSubscribeMessage(client, msg)
 	case "unsubscribe":
-		// Handle unsubscription requests
-		if subscription, ok := msg.Data.(string); ok {
-			client.subscriptionsMu.Lock()
-			delete(client.subscriptions, subscription)
-			client.subscriptionsMu.Unlock()
-
-			// Send confirmation
-			response := WebSocketMessage{
-				Type: "unsubscribed",
-				Data: subscription,
-				ID:   msg.ID,
-			}
-			select {
-			case client.send <- response:
-			default:
-				// Client send buffer is full, skip
-			}
-		}
-
+		h.handleUnsubscribeMessage(client, msg)
 	case "ping":
-		// Handle ping requests
-		response := WebSocketMessage{
-			Type: "pong",
-			ID:   msg.ID,
-		}
-		select {
-		case client.send <- response:
-		default:
-			// Client send buffer is full, skip
-		}
-
+		h.handlePingMessage(client, msg)
 	default:
-		// Unknown message type - could log or handle differently
-		log.Printf("Unknown WebSocket message type: %s", msg.Type)
+		h.handleUnknownMessage(msg)
+	}
+}
+
+// handleSubscribeMessage processes subscription requests from WebSocket clients.
+// It validates the subscription data, updates the client's subscription state,
+// and sends a confirmation response back to the client.
+func (h *WebSocketHandler) handleSubscribeMessage(client *WebSocketClient, msg WebSocketMessage) {
+	subscription, ok := msg.Data.(string)
+	if !ok {
+		return
+	}
+
+	client.subscriptionsMu.Lock()
+	client.subscriptions[subscription] = true
+	client.subscriptionsMu.Unlock()
+
+	h.sendSubscriptionResponse(client, "subscribed", subscription, msg.ID)
+}
+
+// handleUnsubscribeMessage processes unsubscription requests from WebSocket clients.
+// It validates the subscription data, removes it from the client's subscription state,
+// and sends a confirmation response back to the client.
+func (h *WebSocketHandler) handleUnsubscribeMessage(client *WebSocketClient, msg WebSocketMessage) {
+	subscription, ok := msg.Data.(string)
+	if !ok {
+		return
+	}
+
+	client.subscriptionsMu.Lock()
+	delete(client.subscriptions, subscription)
+	client.subscriptionsMu.Unlock()
+
+	h.sendSubscriptionResponse(client, "unsubscribed", subscription, msg.ID)
+}
+
+// handlePingMessage processes ping requests from WebSocket clients.
+// It immediately responds with a pong message containing the original message ID.
+func (h *WebSocketHandler) handlePingMessage(client *WebSocketClient, msg WebSocketMessage) {
+	response := WebSocketMessage{
+		Type: "pong",
+		ID:   msg.ID,
+	}
+	h.sendResponseToClient(client, response)
+}
+
+// handleUnknownMessage processes unknown message types by logging them.
+// This provides debugging information for unsupported message types.
+func (h *WebSocketHandler) handleUnknownMessage(msg WebSocketMessage) {
+	log.Printf("Unknown WebSocket message type: %s", msg.Type)
+}
+
+// sendSubscriptionResponse sends a subscription-related response to the WebSocket client.
+// It creates and sends a response message with the specified type, data, and message ID.
+func (h *WebSocketHandler) sendSubscriptionResponse(client *WebSocketClient, responseType, subscription string, msgID string) {
+	response := WebSocketMessage{
+		Type: responseType,
+		Data: subscription,
+		ID:   msgID,
+	}
+	h.sendResponseToClient(client, response)
+}
+
+// sendResponseToClient attempts to send a response message to the WebSocket client.
+// It uses a non-blocking send to avoid hanging if the client's send buffer is full.
+func (h *WebSocketHandler) sendResponseToClient(client *WebSocketClient, response WebSocketMessage) {
+	select {
+	case client.send <- response:
+	default:
+		// Client send buffer is full, skip
 	}
 }
 
