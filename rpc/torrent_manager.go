@@ -376,10 +376,13 @@ func (tm *TorrentManager) AddTorrent(req TorrentAddRequest) (*TorrentState, erro
 	// Store torrent
 	tm.torrents[torrentState.ID] = torrentState
 
+	// Create a snapshot of torrent state for script hook to avoid race conditions
+	torrentSnapshot := *torrentState
+	
 	// Execute torrent-added script hook
 	go func() {
-		if err := tm.scriptManager.ExecuteHook(ScriptHookTorrentAdded, torrentState); err != nil {
-			tm.log("Failed to execute torrent-added script for torrent %d: %v", torrentState.ID, err)
+		if err := tm.scriptManager.ExecuteHook(ScriptHookTorrentAdded, &torrentSnapshot); err != nil {
+			tm.log("Failed to execute torrent-added script for torrent %d: %v", torrentSnapshot.ID, err)
 		}
 	}()
 
@@ -1052,7 +1055,11 @@ func (tm *TorrentManager) startTorrent(torrent *TorrentState) {
 	// If we don't have metadata, request it through DHT and downloader
 	if torrent.MetaInfo == nil {
 		tm.log("Starting metadata download for torrent %s", torrent.InfoHash.HexString())
+		
+		// Use mutex to safely update torrent status
+		tm.mu.Lock()
 		torrent.Status = TorrentStatusQueuedVerify
+		tm.mu.Unlock()
 
 		// Use DHT to find peers that have this torrent
 		if tm.dhtServer != nil {
@@ -1066,7 +1073,11 @@ func (tm *TorrentManager) startTorrent(torrent *TorrentState) {
 
 	// We have metadata, start the full download process
 	tm.log("Starting file download for torrent %s", torrent.InfoHash.HexString())
+	
+	// Use mutex to safely update torrent status
+	tm.mu.Lock()
 	torrent.Status = TorrentStatusDownloading
+	tm.mu.Unlock()
 
 	// Announce to trackers if available
 	if len(torrent.TrackerList) > 0 {
