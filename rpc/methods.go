@@ -791,17 +791,24 @@ func (m *RPCMethods) updateTorrentLocation(torrent *TorrentState, location strin
 
 	// Check if file moving is requested
 	if move {
-		// Return explicit error for unimplemented file moving functionality
-		// This prevents silent failures and makes the limitation clear to clients
-		return fmt.Errorf("file moving functionality is not implemented - location can only be updated for new downloads")
+		// Use FileManager to move files physically
+		fileManager := NewFileManager()
+		
+		// Get torrent metainfo for file operations
+		metaInfo, err := torrent.MetaInfo.Info()
+		if err != nil {
+			return fmt.Errorf("failed to get torrent info for file moving: %w", err)
+		}
+		
+		// Move files from old location to new location
+		oldLocation := torrent.DownloadDir
+		if err := fileManager.MoveFiles(metaInfo, oldLocation, location, true); err != nil {
+			return fmt.Errorf("failed to move torrent files: %w", err)
+		}
 	}
 
-	// Update the download directory for future downloads
+	// Update the download directory
 	torrent.DownloadDir = location
-
-	// NOTE: File moving functionality is not implemented in this minimal viable solution
-	// When move=false, we only update the download directory for new files
-	// Existing downloaded files remain in their current location
 
 	return nil
 }
