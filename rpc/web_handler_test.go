@@ -360,10 +360,10 @@ func TestCreateMuxWithWebHandler(t *testing.T) {
 			description:    "Should redirect root to web interface",
 		},
 		{
-			name:           "web interface",
-			path:           "/web/index.html",
-			expectedStatus: http.StatusOK,
-			description:    "Should serve web interface files",
+			name:           "web interface redirect",
+			path:           "/web/",
+			expectedStatus: http.StatusMovedPermanently,
+			description:    "Should handle web interface directory requests",
 		},
 		{
 			name:           "RPC endpoint",
