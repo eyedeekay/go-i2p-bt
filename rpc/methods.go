@@ -807,8 +807,8 @@ func (m *RPCMethods) updateTorrentLocation(torrent *TorrentState, location strin
 		}
 	}
 
-	// Update the download directory
-	torrent.DownloadDir = location
+	// Update the download directory using thread-safe method
+	m.manager.UpdateTorrentDownloadDir(torrent, location)
 
 	return nil
 }

@@ -1650,8 +1650,13 @@ func (tm *TorrentManager) verifyPiece(torrent *TorrentState, piece metainfo.Piec
 		return false, err
 	}
 
-	// Construct the file path for this torrent
-	torrentDir := filepath.Join(torrent.DownloadDir, info.Name)
+	// Read DownloadDir under lock to prevent race condition with location updates
+	tm.mu.RLock()
+	downloadDir := torrent.DownloadDir
+	tm.mu.RUnlock()
+
+	// Construct the file path for this torrent using the safely copied download directory
+	torrentDir := filepath.Join(downloadDir, info.Name)
 
 	// Read the piece data from the appropriate files
 	pieceData, err := tm.readPieceFromFiles(torrent, piece, torrentDir)
@@ -1865,6 +1870,14 @@ func (tm *TorrentManager) startTorrentSeeding(torrent *TorrentState) {
 	tm.mu.Unlock()
 
 	tm.log("Started seeding torrent %d", torrent.ID)
+}
+
+// UpdateTorrentDownloadDir safely updates a torrent's download directory under lock
+// This prevents race conditions with concurrent read operations like piece verification
+func (tm *TorrentManager) UpdateTorrentDownloadDir(torrent *TorrentState, newDir string) {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+	torrent.DownloadDir = newDir
 }
 
 // Bandwidth Management Methods
