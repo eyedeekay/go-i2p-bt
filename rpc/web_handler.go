@@ -265,6 +265,7 @@ func CreateMuxWithWebHandler(rpcServer *Server, webConfig WebHandlerConfig) (htt
 //   - error: Configuration or initialization error
 //
 // Example:
+//
 //	webConfig := WebHandlerConfig{
 //		StaticDir: "./web",
 //		URLPrefix: "/",
@@ -278,7 +279,7 @@ func CreateMuxWithWebHandler(rpcServer *Server, webConfig WebHandlerConfig) (htt
 //		log.Fatal(err)
 //	}
 //	defer wsHandler.Close()
-//	
+//
 //	log.Fatal(http.ListenAndServe(":8080", mux))
 func CreateMuxWithWebSocketSupport(rpcServer *Server, webConfig WebHandlerConfig, wsConfig WebSocketConfig) (http.Handler, *WebSocketHandler, error) {
 	webHandler, err := NewWebHandler(webConfig, rpcServer)
