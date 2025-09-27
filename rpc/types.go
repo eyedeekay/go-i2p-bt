@@ -452,6 +452,7 @@ type TorrentState struct {
 	lastStatsUpdate time.Time // Internal field for rate calculation
 	lastDownloaded  int64     // Internal field for rate calculation
 	lastUploaded    int64     // Internal field for rate calculation
+	wasComplete     bool      // Internal field to track completion state changes for script hooks
 
 	// File information
 	Files      []FileInfo `json:"files"`

@@ -376,6 +376,13 @@ func (tm *TorrentManager) AddTorrent(req TorrentAddRequest) (*TorrentState, erro
 	// Store torrent
 	tm.torrents[torrentState.ID] = torrentState
 
+	// Execute torrent-added script hook
+	go func() {
+		if err := tm.scriptManager.ExecuteHook(ScriptHookTorrentAdded, torrentState); err != nil {
+			tm.log("Failed to execute torrent-added script for torrent %d: %v", torrentState.ID, err)
+		}
+	}()
+
 	// Start download process if appropriate
 	tm.handleTorrentStartup(torrentState, req.Paused, metaInfo != nil)
 
@@ -856,6 +863,12 @@ func (tm *TorrentManager) applyRuntimeConfigChanges(oldConfig, newConfig Session
 		}
 	}
 
+	// Update script configuration if changed
+	if oldConfig.ScriptTorrentDoneEnabled != newConfig.ScriptTorrentDoneEnabled ||
+		oldConfig.ScriptTorrentDoneFilename != newConfig.ScriptTorrentDoneFilename {
+		tm.updateScriptConfiguration(newConfig)
+	}
+
 	return nil
 }
 
@@ -964,9 +977,9 @@ func (tm *TorrentManager) updateBlocklistConfiguration(config SessionConfigurati
 func (tm *TorrentManager) updateScriptConfiguration(config SessionConfiguration) {
 	// Update torrent-done script hook
 	tm.scriptManager.UpdateHookConfig(ScriptHookTorrentDone, &ScriptHookConfig{
-		Enabled:  config.ScriptTorrentDoneEnabled,
-		Filename: config.ScriptTorrentDoneFilename,
-		Timeout:  30 * time.Second, // Default timeout
+		Enabled:     config.ScriptTorrentDoneEnabled,
+		Filename:    config.ScriptTorrentDoneFilename,
+		Timeout:     30 * time.Second, // Default timeout
 		Environment: map[string]string{
 			// Additional environment variables can be added here
 		},
@@ -1347,6 +1360,18 @@ func (tm *TorrentManager) updateCompletionStatistics(torrent *TorrentState) {
 			torrent.PiecesComplete = tm.calculateCompletedPieces(torrent)
 			torrent.PiecesAvailable = tm.calculateAvailablePieces(torrent)
 		}
+	}
+
+	// Check for completion state change and execute script hook
+	isComplete := torrent.PercentDone >= 1.0
+	if !torrent.wasComplete && isComplete {
+		// Torrent just completed - execute torrent-done script hook
+		torrent.wasComplete = true
+		go func() {
+			if err := tm.scriptManager.ExecuteHook(ScriptHookTorrentDone, torrent); err != nil {
+				tm.log("Failed to execute torrent-done script for torrent %d: %v", torrent.ID, err)
+			}
+		}()
 	}
 }
 
