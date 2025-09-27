@@ -199,39 +199,19 @@ func (bm *BlocklistManager) parseBlocklist(r io.Reader) ([]ipRange, error) {
 			continue
 		}
 
-		// Try to parse as CIDR first
-		if strings.Contains(line, "/") {
-			_, cidr, err := net.ParseCIDR(line)
-			if err == nil {
-				start, end := bm.cidrToRange(cidr)
-				ranges = append(ranges, ipRange{start: start, end: end})
-				continue
-			}
+		// Try parsing different formats in order of likelihood
+		if ipRange, parsed := bm.parseCIDRLine(line); parsed {
+			ranges = append(ranges, ipRange)
+			continue
 		}
 
-		// Try to parse as DAT format (name:start-end)
-		if strings.Contains(line, ":") && strings.Contains(line, "-") {
-			parts := strings.SplitN(line, ":", 2)
-			if len(parts) == 2 {
-				rangePart := parts[1]
-				if strings.Contains(rangePart, "-") {
-					rangeParts := strings.SplitN(rangePart, "-", 2)
-					if len(rangeParts) == 2 {
-						start := net.ParseIP(strings.TrimSpace(rangeParts[0]))
-						end := net.ParseIP(strings.TrimSpace(rangeParts[1]))
-						if start != nil && end != nil {
-							ranges = append(ranges, ipRange{start: start, end: end})
-							continue
-						}
-					}
-				}
-			}
+		if ipRange, parsed := bm.parseDATFormatLine(line); parsed {
+			ranges = append(ranges, ipRange)
+			continue
 		}
 
-		// Try to parse as single IP
-		ip := net.ParseIP(line)
-		if ip != nil {
-			ranges = append(ranges, ipRange{start: ip, end: ip})
+		if ipRange, parsed := bm.parseSingleIPLine(line); parsed {
+			ranges = append(ranges, ipRange)
 		}
 	}
 
@@ -239,12 +219,73 @@ func (bm *BlocklistManager) parseBlocklist(r io.Reader) ([]ipRange, error) {
 		return nil, err
 	}
 
-	// Sort ranges for efficient lookup
+	bm.sortIPRanges(ranges)
+	return ranges, nil
+}
+
+// parseCIDRLine attempts to parse a line as a CIDR block.
+// Returns the parsed IP range and true if successful, zero value and false otherwise.
+func (bm *BlocklistManager) parseCIDRLine(line string) (ipRange, bool) {
+	if !strings.Contains(line, "/") {
+		return ipRange{}, false
+	}
+
+	_, cidr, err := net.ParseCIDR(line)
+	if err != nil {
+		return ipRange{}, false
+	}
+
+	start, end := bm.cidrToRange(cidr)
+	return ipRange{start: start, end: end}, true
+}
+
+// parseDATFormatLine attempts to parse a line in DAT format (name:start-end).
+// Returns the parsed IP range and true if successful, zero value and false otherwise.
+func (bm *BlocklistManager) parseDATFormatLine(line string) (ipRange, bool) {
+	if !strings.Contains(line, ":") || !strings.Contains(line, "-") {
+		return ipRange{}, false
+	}
+
+	parts := strings.SplitN(line, ":", 2)
+	if len(parts) != 2 {
+		return ipRange{}, false
+	}
+
+	rangePart := parts[1]
+	if !strings.Contains(rangePart, "-") {
+		return ipRange{}, false
+	}
+
+	rangeParts := strings.SplitN(rangePart, "-", 2)
+	if len(rangeParts) != 2 {
+		return ipRange{}, false
+	}
+
+	start := net.ParseIP(strings.TrimSpace(rangeParts[0]))
+	end := net.ParseIP(strings.TrimSpace(rangeParts[1]))
+	if start == nil || end == nil {
+		return ipRange{}, false
+	}
+
+	return ipRange{start: start, end: end}, true
+}
+
+// parseSingleIPLine attempts to parse a line as a single IP address.
+// Returns the parsed IP range (start == end) and true if successful, zero value and false otherwise.
+func (bm *BlocklistManager) parseSingleIPLine(line string) (ipRange, bool) {
+	ip := net.ParseIP(line)
+	if ip == nil {
+		return ipRange{}, false
+	}
+	return ipRange{start: ip, end: ip}, true
+}
+
+// sortIPRanges sorts the provided IP ranges for efficient binary search lookup.
+// Modifies the slice in place using the BlocklistManager's IP comparison function.
+func (bm *BlocklistManager) sortIPRanges(ranges []ipRange) {
 	sort.Slice(ranges, func(i, j int) bool {
 		return bm.compareIPs(ranges[i].start, ranges[j].start) < 0
 	})
-
-	return ranges, nil
 }
 
 // cidrToRange converts a CIDR block to start and end IP addresses.
