@@ -43,7 +43,7 @@ echo "TR_TIME_LOCALTIME=$TR_TIME_LOCALTIME" >> %s
 exit 0
 `, outputFile, outputFile, outputFile, outputFile, outputFile, outputFile)
 
-	err := ioutil.WriteFile(scriptPath, []byte(scriptContent), 0755)
+	err := ioutil.WriteFile(scriptPath, []byte(scriptContent), 0o755)
 	if err != nil {
 		t.Fatalf("Failed to create integration test script: %v", err)
 	}
@@ -265,7 +265,7 @@ func TestTorrentManager_ScriptHooks_ErrorHandling(t *testing.T) {
 echo "This script will fail" >&2
 exit 1
 `
-	err := ioutil.WriteFile(scriptPath, []byte(scriptContent), 0755)
+	err := ioutil.WriteFile(scriptPath, []byte(scriptContent), 0o755)
 	if err != nil {
 		t.Fatalf("Failed to create failing script: %v", err)
 	}
@@ -316,7 +316,7 @@ sleep 3
 echo "Should not reach this"
 exit 0
 `
-	err := ioutil.WriteFile(scriptPath, []byte(scriptContent), 0755)
+	err := ioutil.WriteFile(scriptPath, []byte(scriptContent), 0o755)
 	if err != nil {
 		t.Fatalf("Failed to create slow script: %v", err)
 	}
@@ -362,7 +362,7 @@ func BenchmarkTorrentManager_ScriptHooks_ExecuteHook(b *testing.B) {
 	scriptContent := `#!/bin/bash
 exit 0
 `
-	err := ioutil.WriteFile(scriptPath, []byte(scriptContent), 0755)
+	err := ioutil.WriteFile(scriptPath, []byte(scriptContent), 0o755)
 	if err != nil {
 		b.Fatalf("Failed to create fast script: %v", err)
 	}

@@ -28,7 +28,7 @@ func createTestScript(t *testing.T, content string) string {
 	scriptPath := filepath.Join(tmpDir, "test_script.sh")
 
 	// Write script content
-	err := ioutil.WriteFile(scriptPath, []byte(content), 0755)
+	err := ioutil.WriteFile(scriptPath, []byte(content), 0o755)
 	if err != nil {
 		t.Fatalf("Failed to create test script: %v", err)
 	}
@@ -364,7 +364,7 @@ func TestScriptManager_validateScriptFile(t *testing.T) {
 
 	// Test non-executable file
 	nonExecFile := filepath.Join(tmpDir, "non_exec.txt")
-	ioutil.WriteFile(nonExecFile, []byte("test"), 0644) // No execute permission
+	ioutil.WriteFile(nonExecFile, []byte("test"), 0o644) // No execute permission
 	err = sm.validateScriptFile(nonExecFile)
 	if err == nil {
 		t.Error("Expected error for non-executable file")
@@ -372,7 +372,7 @@ func TestScriptManager_validateScriptFile(t *testing.T) {
 
 	// Test valid executable file
 	execFile := filepath.Join(tmpDir, "exec.sh")
-	ioutil.WriteFile(execFile, []byte("#!/bin/bash\necho test"), 0755) // With execute permission
+	ioutil.WriteFile(execFile, []byte("#!/bin/bash\necho test"), 0o755) // With execute permission
 	err = sm.validateScriptFile(execFile)
 	if err != nil {
 		t.Errorf("Expected no error for valid executable file: %v", err)

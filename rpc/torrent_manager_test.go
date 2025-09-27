@@ -1195,7 +1195,7 @@ func TestUpdateSessionConfig_NonWritableDirectory(t *testing.T) {
 	defer os.RemoveAll(tempDir)
 
 	// Make directory read-only
-	err = os.Chmod(tempDir, 0444)
+	err = os.Chmod(tempDir, 0o444)
 	if err != nil {
 		t.Fatalf("Failed to make directory read-only: %v", err)
 	}

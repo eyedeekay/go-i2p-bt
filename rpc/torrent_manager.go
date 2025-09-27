@@ -789,7 +789,7 @@ func (tm *TorrentManager) validateAndCreateDownloadDir(downloadDir string) error
 	if _, err := os.Stat(downloadDir); err != nil {
 		if os.IsNotExist(err) {
 			// Directory doesn't exist, try to create it
-			if err := os.MkdirAll(downloadDir, 0755); err != nil {
+			if err := os.MkdirAll(downloadDir, 0o755); err != nil {
 				return fmt.Errorf("cannot create download directory: %w", err)
 			}
 		} else {
@@ -1019,7 +1019,7 @@ func (tm *TorrentManager) updateIncompleteDirConfiguration(oldConfig, newConfig 
 // Queue Management Methods
 
 // SetTorrentQueuePosition sets the queue position for a torrent
-func (tm *TorrentManager) SetTorrentQueuePosition(id int64, position int64) error {
+func (tm *TorrentManager) SetTorrentQueuePosition(id, position int64) error {
 	tm.mu.RLock()
 	_, exists := tm.torrents[id]
 	tm.mu.RUnlock()

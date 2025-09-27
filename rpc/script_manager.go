@@ -195,7 +195,7 @@ func (sm *ScriptManager) validateScriptFile(filename string) error {
 	}
 
 	// Check if file is executable (owner execute bit)
-	if info.Mode()&0100 == 0 {
+	if info.Mode()&0o100 == 0 {
 		return fmt.Errorf("script file is not executable: %s", absPath)
 	}
 

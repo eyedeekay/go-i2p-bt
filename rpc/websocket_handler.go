@@ -148,10 +148,11 @@ type WebSocketHandler struct {
 
 // WebSocketClient represents a connected WebSocket client
 type WebSocketClient struct {
-	conn          *websocket.Conn
-	authenticated bool
-	subscriptions map[string]bool // Track what the client is subscribed to
-	send          chan WebSocketMessage
+	conn            *websocket.Conn
+	authenticated   bool
+	subscriptions   map[string]bool // Track what the client is subscribed to
+	subscriptionsMu sync.RWMutex    // Protects subscriptions map from race conditions
+	send            chan WebSocketMessage
 }
 
 // NewWebSocketHandler creates a new WebSocket handler with the specified configuration.
@@ -307,7 +308,9 @@ func (h *WebSocketHandler) processClientMessage(client *WebSocketClient, msg Web
 	case "subscribe":
 		// Handle subscription requests
 		if subscription, ok := msg.Data.(string); ok {
+			client.subscriptionsMu.Lock()
 			client.subscriptions[subscription] = true
+			client.subscriptionsMu.Unlock()
 
 			// Send confirmation
 			response := WebSocketMessage{
@@ -325,7 +328,9 @@ func (h *WebSocketHandler) processClientMessage(client *WebSocketClient, msg Web
 	case "unsubscribe":
 		// Handle unsubscription requests
 		if subscription, ok := msg.Data.(string); ok {
+			client.subscriptionsMu.Lock()
 			delete(client.subscriptions, subscription)
+			client.subscriptionsMu.Unlock()
 
 			// Send confirmation
 			response := WebSocketMessage{
@@ -398,7 +403,10 @@ func (h *WebSocketHandler) handleBroadcast() {
 			h.clientsMu.RLock()
 			for _, client := range h.clients {
 				// Check if client is subscribed to this message type
-				if client.subscriptions[message.Type] || message.Type == "system" {
+				client.subscriptionsMu.RLock()
+				isSubscribed := client.subscriptions[message.Type] || message.Type == "system"
+				client.subscriptionsMu.RUnlock()
+				if isSubscribed {
 					select {
 					case client.send <- message:
 					default:

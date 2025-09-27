@@ -61,7 +61,7 @@ func (fm *FileManager) MoveFiles(info metainfo.Info, sourceDir, destDir string, 
 	}
 
 	// Create destination directory if it doesn't exist
-	if err := os.MkdirAll(destDir, 0755); err != nil {
+	if err := os.MkdirAll(destDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create destination directory: %w", err)
 	}
 
@@ -100,7 +100,7 @@ func (fm *FileManager) MoveFiles(info metainfo.Info, sourceDir, destDir string, 
 			}
 
 			// Create destination directory for this file
-			if err := os.MkdirAll(filepath.Dir(destFile), 0755); err != nil {
+			if err := os.MkdirAll(filepath.Dir(destFile), 0o755); err != nil {
 				// Rollback any files we've already moved
 				fm.rollbackMoves(movedFiles)
 				return fmt.Errorf("failed to create directory for %s: %w", destFile, err)
@@ -276,7 +276,7 @@ func (fm *FileManager) RenamePartialFile(partialPath, finalPath string) error {
 	}
 
 	// Create destination directory if needed
-	if err := os.MkdirAll(filepath.Dir(finalPath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(finalPath), 0o755); err != nil {
 		return fmt.Errorf("failed to create destination directory: %w", err)
 	}
 
@@ -346,9 +346,11 @@ func (fm *FileManager) ValidateFileName(fileName string) error {
 	}
 
 	// Check for reserved names on Windows (for cross-platform compatibility)
-	reservedNames := []string{"CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4",
+	reservedNames := []string{
+		"CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4",
 		"COM5", "COM6", "COM7", "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5",
-		"LPT6", "LPT7", "LPT8", "LPT9"}
+		"LPT6", "LPT7", "LPT8", "LPT9",
+	}
 
 	upperFileName := strings.ToUpper(fileName)
 	for _, reserved := range reservedNames {

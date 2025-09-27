@@ -400,7 +400,7 @@ func TestNoDirectoryListingFS(t *testing.T) {
 
 	// Create subdirectory
 	subDir := filepath.Join(tempDir, "subdir")
-	err := os.Mkdir(subDir, 0755)
+	err := os.Mkdir(subDir, 0o755)
 	if err != nil {
 		t.Fatalf("Failed to create subdirectory: %v", err)
 	}
@@ -581,7 +581,7 @@ func createTestFiles(t *testing.T, dir string) {
 
 	for name, content := range files {
 		path := filepath.Join(dir, name)
-		err := os.WriteFile(path, []byte(content), 0644)
+		err := os.WriteFile(path, []byte(content), 0o644)
 		if err != nil {
 			t.Fatalf("Failed to create test file %s: %v", name, err)
 		}

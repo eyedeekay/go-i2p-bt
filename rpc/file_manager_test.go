@@ -90,7 +90,7 @@ func TestMoveFilesSingleFile(t *testing.T) {
 	// Create test file
 	testContent := "test file content"
 	sourceFile := filepath.Join(sourceDir, "test.txt")
-	if err := os.WriteFile(sourceFile, []byte(testContent), 0644); err != nil {
+	if err := os.WriteFile(sourceFile, []byte(testContent), 0o644); err != nil {
 		t.Fatalf("Failed to create test file: %v", err)
 	}
 
@@ -139,7 +139,7 @@ func TestMoveFilesMultiFile(t *testing.T) {
 	// Create test directory structure
 	torrentName := "test_torrent"
 	torrentDir := filepath.Join(sourceDir, torrentName)
-	if err := os.MkdirAll(torrentDir, 0755); err != nil {
+	if err := os.MkdirAll(torrentDir, 0o755); err != nil {
 		t.Fatalf("Failed to create torrent directory: %v", err)
 	}
 
@@ -156,10 +156,10 @@ func TestMoveFilesMultiFile(t *testing.T) {
 	var totalLength int64
 	for _, file := range files {
 		fullPath := filepath.Join(torrentDir, file.path)
-		if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
 			t.Fatalf("Failed to create directory for %s: %v", file.path, err)
 		}
-		if err := os.WriteFile(fullPath, []byte(file.content), 0644); err != nil {
+		if err := os.WriteFile(fullPath, []byte(file.content), 0o644); err != nil {
 			t.Fatalf("Failed to create file %s: %v", file.path, err)
 		}
 		totalLength += int64(len(file.content))
@@ -210,7 +210,7 @@ func TestMoveFilesInsufficientSpace(t *testing.T) {
 
 	// Create small test file
 	sourceFile := filepath.Join(sourceDir, "test.txt")
-	if err := os.WriteFile(sourceFile, []byte("test"), 0644); err != nil {
+	if err := os.WriteFile(sourceFile, []byte("test"), 0o644); err != nil {
 		t.Fatalf("Failed to create test file: %v", err)
 	}
 
@@ -257,7 +257,7 @@ func TestVerifyFile(t *testing.T) {
 	// Create test file
 	testContent := "test file for verification"
 	testFile := filepath.Join(t.TempDir(), "verify_test.txt")
-	if err := os.WriteFile(testFile, []byte(testContent), 0644); err != nil {
+	if err := os.WriteFile(testFile, []byte(testContent), 0o644); err != nil {
 		t.Fatalf("Failed to create test file: %v", err)
 	}
 
@@ -299,7 +299,7 @@ func TestRenamePartialFile(t *testing.T) {
 
 	// Create partial file
 	testContent := "partial file content"
-	if err := os.WriteFile(partialFile, []byte(testContent), 0644); err != nil {
+	if err := os.WriteFile(partialFile, []byte(testContent), 0o644); err != nil {
 		t.Fatalf("Failed to create partial file: %v", err)
 	}
 
@@ -345,10 +345,10 @@ func TestRenamePartialFileErrors(t *testing.T) {
 	finalFile := filepath.Join(tempDir, "test.txt")
 
 	// Create both files
-	if err := os.WriteFile(partialFile, []byte("partial"), 0644); err != nil {
+	if err := os.WriteFile(partialFile, []byte("partial"), 0o644); err != nil {
 		t.Fatalf("Failed to create partial file: %v", err)
 	}
-	if err := os.WriteFile(finalFile, []byte("existing"), 0644); err != nil {
+	if err := os.WriteFile(finalFile, []byte("existing"), 0o644); err != nil {
 		t.Fatalf("Failed to create final file: %v", err)
 	}
 
@@ -369,7 +369,7 @@ func TestCleanupPartialFiles(t *testing.T) {
 	// Test single file torrent cleanup
 	t.Run("SingleFile", func(t *testing.T) {
 		partialFile := filepath.Join(tempDir, "single.txt.part")
-		if err := os.WriteFile(partialFile, []byte("partial"), 0644); err != nil {
+		if err := os.WriteFile(partialFile, []byte("partial"), 0o644); err != nil {
 			t.Fatalf("Failed to create partial file: %v", err)
 		}
 
@@ -394,7 +394,7 @@ func TestCleanupPartialFiles(t *testing.T) {
 	t.Run("MultiFile", func(t *testing.T) {
 		torrentName := "multi_torrent"
 		torrentDir := filepath.Join(tempDir, torrentName)
-		if err := os.MkdirAll(filepath.Join(torrentDir, "subdir"), 0755); err != nil {
+		if err := os.MkdirAll(filepath.Join(torrentDir, "subdir"), 0o755); err != nil {
 			t.Fatalf("Failed to create torrent directory: %v", err)
 		}
 
@@ -405,7 +405,7 @@ func TestCleanupPartialFiles(t *testing.T) {
 		}
 
 		for _, pf := range partialFiles {
-			if err := os.WriteFile(pf, []byte("partial"), 0644); err != nil {
+			if err := os.WriteFile(pf, []byte("partial"), 0o644); err != nil {
 				t.Fatalf("Failed to create partial file %s: %v", pf, err)
 			}
 		}
@@ -530,7 +530,7 @@ func TestCopyFile(t *testing.T) {
 	destFile := filepath.Join(tempDir, "dest.txt")
 
 	testContent := "test content for copy"
-	if err := os.WriteFile(sourceFile, []byte(testContent), 0644); err != nil {
+	if err := os.WriteFile(sourceFile, []byte(testContent), 0o644); err != nil {
 		t.Fatalf("Failed to create source file: %v", err)
 	}
 

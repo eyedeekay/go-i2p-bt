@@ -200,7 +200,7 @@ func (qm *QueueManager) RemoveFromQueue(torrentID int64) {
 }
 
 // SetQueuePosition sets the queue position for a torrent
-func (qm *QueueManager) SetQueuePosition(torrentID int64, position int64) error {
+func (qm *QueueManager) SetQueuePosition(torrentID, position int64) error {
 	qm.mu.Lock()
 	defer qm.mu.Unlock()
 
@@ -467,7 +467,7 @@ func (qm *QueueManager) processSeedQueue() {
 }
 
 // moveInDownloadQueue moves a torrent to a specific position in the download queue
-func (qm *QueueManager) moveInDownloadQueue(torrentID int64, newPosition int64) error {
+func (qm *QueueManager) moveInDownloadQueue(torrentID, newPosition int64) error {
 	// Find current position
 	currentPos := -1
 	for i, id := range qm.downloadOrder {
@@ -509,7 +509,7 @@ func (qm *QueueManager) moveInDownloadQueue(torrentID int64, newPosition int64) 
 }
 
 // moveInSeedQueue moves a torrent to a specific position in the seed queue
-func (qm *QueueManager) moveInSeedQueue(torrentID int64, newPosition int64) error {
+func (qm *QueueManager) moveInSeedQueue(torrentID, newPosition int64) error {
 	// Find current position
 	currentPos := -1
 	for i, id := range qm.seedOrder {

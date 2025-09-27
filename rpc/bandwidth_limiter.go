@@ -133,7 +133,7 @@ func (bl *BandwidthLimiter) GetConfiguration() (maxBytesPerSecond int64, enabled
 }
 
 // GetStats returns current limiter statistics
-func (bl *BandwidthLimiter) GetStats() (availableTokens int64, maxTokens int64) {
+func (bl *BandwidthLimiter) GetStats() (availableTokens, maxTokens int64) {
 	bl.mu.Lock()
 	defer bl.mu.Unlock()
 
