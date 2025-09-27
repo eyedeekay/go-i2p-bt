@@ -1623,7 +1623,8 @@ func (tm *TorrentManager) verifyTorrentAsync(torrent *TorrentState) {
 	torrent.Left = totalBytes - completedBytes
 	tm.mu.Unlock()
 
-	// Update file completion stats
+	// Update file completion stats and status with proper synchronization
+	tm.mu.Lock()
 	tm.updateFileCompletion(torrent, info, completedBytes)
 
 	// Update status based on verification results
@@ -1640,6 +1641,7 @@ func (tm *TorrentManager) verifyTorrentAsync(torrent *TorrentState) {
 		torrent.Status = TorrentStatusDownloading
 		tm.log("Torrent %s has no verified pieces, starting download", torrent.InfoHash.HexString())
 	}
+	tm.mu.Unlock()
 }
 
 // verifyPiece verifies a single piece by reading it from disk and checking its hash
@@ -1767,6 +1769,7 @@ func (tm *TorrentManager) readFileSegment(filePath string, offset, length int64)
 }
 
 // updateFileCompletion updates individual file completion statistics
+// Caller must hold tm.mu lock to prevent race conditions
 func (tm *TorrentManager) updateFileCompletion(torrent *TorrentState, info metainfo.Info, totalCompleted int64) {
 	var currentOffset int64
 
@@ -1785,7 +1788,7 @@ func (tm *TorrentManager) updateFileCompletion(torrent *TorrentState, info metai
 		}
 		// else fileCompleted remains 0
 
-		// Update file info
+		// Update file info (caller must hold tm.mu lock)
 		if i < len(torrent.Files) {
 			torrent.Files[i].BytesCompleted = fileCompleted
 		}
