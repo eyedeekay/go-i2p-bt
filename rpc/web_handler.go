@@ -116,7 +116,7 @@ func (w *WebHandler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 
 	// Clean and validate the request path
 	cleanPath := path.Clean(r.URL.Path)
-	
+
 	// Security: Prevent directory traversal attacks
 	if strings.Contains(r.URL.Path, "..") || strings.Contains(cleanPath, "..") {
 		http.Error(rw, "Invalid path", http.StatusBadRequest)
@@ -146,12 +146,12 @@ func (w *WebHandler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 // setSecurityHeaders adds security-focused HTTP headers
 func (w *WebHandler) setSecurityHeaders(rw http.ResponseWriter) {
 	headers := rw.Header()
-	
+
 	// Prevent XSS attacks
 	headers.Set("X-Content-Type-Options", "nosniff")
 	headers.Set("X-Frame-Options", "DENY")
 	headers.Set("X-XSS-Protection", "1; mode=block")
-	
+
 	// Content Security Policy for web apps
 	csp := "default-src 'self'; " +
 		"script-src 'self' 'unsafe-inline'; " +
@@ -159,7 +159,7 @@ func (w *WebHandler) setSecurityHeaders(rw http.ResponseWriter) {
 		"img-src 'self' data:; " +
 		"connect-src 'self'"
 	headers.Set("Content-Security-Policy", csp)
-	
+
 	// Referrer policy
 	headers.Set("Referrer-Policy", "strict-origin-when-cross-origin")
 }
@@ -167,7 +167,7 @@ func (w *WebHandler) setSecurityHeaders(rw http.ResponseWriter) {
 // setCacheHeaders sets appropriate cache headers based on file type
 func (w *WebHandler) setCacheHeaders(rw http.ResponseWriter, filePath string) {
 	ext := strings.ToLower(filepath.Ext(filePath))
-	
+
 	// Different cache policies for different file types
 	switch ext {
 	case ".html", ".htm":
@@ -225,13 +225,13 @@ func CreateMuxWithWebHandler(rpcServer *Server, webConfig WebHandlerConfig) (htt
 
 	// Create multiplexer that routes requests appropriately
 	mux := http.NewServeMux()
-	
+
 	// Handle RPC requests at /transmission/rpc
 	mux.Handle("/transmission/rpc", rpcServer)
-	
+
 	// Handle web interface requests at the configured prefix
 	mux.Handle(webConfig.URLPrefix, http.StripPrefix(strings.TrimSuffix(webConfig.URLPrefix, "/"), webHandler))
-	
+
 	// Handle root redirect to web interface for convenience
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/" {
@@ -256,7 +256,7 @@ func NewDefaultWebHandler(staticDir string, server *Server) (*WebHandler, error)
 		RequireAuth:            false, // Allow public access to web interface
 		EnableDirectoryListing: false, // Security: disable directory browsing
 	}
-	
+
 	return NewWebHandler(config, server)
 }
 
@@ -270,7 +270,7 @@ func NewSecureWebHandler(staticDir string, server *Server) (*WebHandler, error) 
 		RequireAuth:            true, // Require authentication
 		EnableDirectoryListing: false,
 	}
-	
+
 	return NewWebHandler(config, server)
 }
 
@@ -278,7 +278,7 @@ func NewSecureWebHandler(staticDir string, server *Server) (*WebHandler, error) 
 // This can be used for setting Content-Type headers if needed
 func GetMimeType(filename string) string {
 	ext := strings.ToLower(filepath.Ext(filename))
-	
+
 	mimeTypes := map[string]string{
 		".html": "text/html; charset=utf-8",
 		".htm":  "text/html; charset=utf-8",
@@ -293,10 +293,10 @@ func GetMimeType(filename string) string {
 		".ico":  "image/x-icon",
 		".txt":  "text/plain; charset=utf-8",
 	}
-	
+
 	if mimeType, exists := mimeTypes[ext]; exists {
 		return mimeType
 	}
-	
+
 	return "application/octet-stream"
 }

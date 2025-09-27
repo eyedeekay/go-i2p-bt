@@ -27,7 +27,7 @@ import (
 func TestWebHandlerConfig(t *testing.T) {
 	// Create temporary directory for testing
 	tempDir := t.TempDir()
-	
+
 	// Create test server for auth testing
 	server := createTestServer(t)
 
@@ -80,24 +80,24 @@ func TestWebHandlerConfig(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			handler, err := NewWebHandler(tt.config, server)
-			
+
 			if tt.expectError {
 				if err == nil {
 					t.Errorf("Expected error but got none")
 				}
 				return
 			}
-			
+
 			if err != nil {
 				t.Errorf("Unexpected error: %v", err)
 				return
 			}
-			
+
 			if handler == nil {
 				t.Errorf("Expected handler but got nil")
 				return
 			}
-			
+
 			// Check defaults were applied
 			if handler.config.URLPrefix == "custom" {
 				// Should be normalized to "/custom/"
@@ -105,7 +105,7 @@ func TestWebHandlerConfig(t *testing.T) {
 					t.Errorf("Expected URL prefix to be normalized to '/custom/', got '%s'", handler.config.URLPrefix)
 				}
 			}
-			
+
 			if handler.config.IndexFile == "" {
 				t.Errorf("Expected default index file to be set")
 			}
@@ -118,10 +118,10 @@ func TestWebHandlerServeHTTP(t *testing.T) {
 	// Create temporary directory with test files
 	tempDir := t.TempDir()
 	createTestFiles(t, tempDir)
-	
+
 	// Create test server
 	server := createTestServer(t)
-	
+
 	// Create web handler
 	config := WebHandlerConfig{
 		StaticDir:              tempDir,
@@ -131,7 +131,7 @@ func TestWebHandlerServeHTTP(t *testing.T) {
 		RequireAuth:            false,
 		EnableDirectoryListing: false,
 	}
-	
+
 	handler, err := NewWebHandler(config, server)
 	if err != nil {
 		t.Fatalf("Failed to create web handler: %v", err)
@@ -227,20 +227,20 @@ func TestWebHandlerServeHTTP(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			req := httptest.NewRequest(tt.method, tt.path, nil)
 			w := httptest.NewRecorder()
-			
+
 			handler.ServeHTTP(w, req)
-			
+
 			if w.Code != tt.expectedStatus {
 				t.Errorf("Expected status %d, got %d", tt.expectedStatus, w.Code)
 			}
-			
+
 			if tt.expectedBody != "" {
 				bodyStr := strings.TrimSpace(w.Body.String())
 				if !strings.Contains(bodyStr, tt.expectedBody) {
 					t.Errorf("Expected body to contain '%s', got '%s'", tt.expectedBody, bodyStr)
 				}
 			}
-			
+
 			if tt.checkHeaders != nil {
 				tt.checkHeaders(t, w.Header())
 			}
@@ -252,17 +252,17 @@ func TestWebHandlerServeHTTP(t *testing.T) {
 func TestWebHandlerAuthentication(t *testing.T) {
 	tempDir := t.TempDir()
 	createTestFiles(t, tempDir)
-	
+
 	// Create server with authentication
 	server := createTestServerWithAuth(t, "admin", "secret")
-	
+
 	// Create web handler requiring auth
 	config := WebHandlerConfig{
 		StaticDir:   tempDir,
 		URLPrefix:   "/web/",
 		RequireAuth: true,
 	}
-	
+
 	handler, err := NewWebHandler(config, server)
 	if err != nil {
 		t.Fatalf("Failed to create web handler: %v", err)
@@ -303,18 +303,18 @@ func TestWebHandlerAuthentication(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			req := httptest.NewRequest("GET", "/test.txt", nil)
-			
+
 			if tt.addAuth {
 				req.SetBasicAuth(tt.username, tt.password)
 			}
-			
+
 			w := httptest.NewRecorder()
 			handler.ServeHTTP(w, req)
-			
+
 			if w.Code != tt.expectedStatus {
 				t.Errorf("Expected status %d, got %d", tt.expectedStatus, w.Code)
 			}
-			
+
 			if tt.expectedStatus == http.StatusUnauthorized {
 				authHeader := w.Header().Get("WWW-Authenticate")
 				if authHeader == "" {
@@ -329,19 +329,19 @@ func TestWebHandlerAuthentication(t *testing.T) {
 func TestCreateMuxWithWebHandler(t *testing.T) {
 	tempDir := t.TempDir()
 	createTestFiles(t, tempDir)
-	
+
 	server := createTestServer(t)
-	
+
 	config := WebHandlerConfig{
 		StaticDir: tempDir,
 		URLPrefix: "/web/",
 	}
-	
+
 	mux, err := CreateMuxWithWebHandler(server, config)
 	if err != nil {
 		t.Fatalf("Failed to create mux: %v", err)
 	}
-	
+
 	if mux == nil {
 		t.Fatalf("Expected mux but got nil")
 	}
@@ -383,9 +383,9 @@ func TestCreateMuxWithWebHandler(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			req := httptest.NewRequest("GET", tt.path, nil)
 			w := httptest.NewRecorder()
-			
+
 			mux.ServeHTTP(w, req)
-			
+
 			if w.Code != tt.expectedStatus {
 				t.Errorf("Expected status %d, got %d", tt.expectedStatus, w.Code)
 			}
@@ -397,16 +397,16 @@ func TestCreateMuxWithWebHandler(t *testing.T) {
 func TestNoDirectoryListingFS(t *testing.T) {
 	tempDir := t.TempDir()
 	createTestFiles(t, tempDir)
-	
+
 	// Create subdirectory
 	subDir := filepath.Join(tempDir, "subdir")
 	err := os.Mkdir(subDir, 0755)
 	if err != nil {
 		t.Fatalf("Failed to create subdirectory: %v", err)
 	}
-	
+
 	fs := noDirectoryListingFS{http.Dir(tempDir)}
-	
+
 	// Test file access (should work)
 	file, err := fs.Open("/test.txt")
 	if err != nil {
@@ -414,7 +414,7 @@ func TestNoDirectoryListingFS(t *testing.T) {
 	} else {
 		file.Close()
 	}
-	
+
 	// Test directory access (should fail)
 	_, err = fs.Open("/subdir")
 	if err == nil {
@@ -453,7 +453,7 @@ func TestGetMimeType(t *testing.T) {
 func TestUtilityFunctions(t *testing.T) {
 	tempDir := t.TempDir()
 	createTestFiles(t, tempDir)
-	
+
 	server := createTestServer(t)
 
 	t.Run("NewDefaultWebHandler", func(t *testing.T) {
@@ -464,7 +464,7 @@ func TestUtilityFunctions(t *testing.T) {
 		if handler == nil {
 			t.Errorf("Expected handler but got nil")
 		}
-		
+
 		// Check defaults
 		if handler.config.URLPrefix != "/web/" {
 			t.Errorf("Expected default URL prefix '/web/', got '%s'", handler.config.URLPrefix)
@@ -482,7 +482,7 @@ func TestUtilityFunctions(t *testing.T) {
 		if handler == nil {
 			t.Errorf("Expected handler but got nil")
 		}
-		
+
 		// Check secure defaults
 		if handler.config.RequireAuth != true {
 			t.Errorf("Expected RequireAuth to be true for secure handler")
@@ -494,7 +494,7 @@ func TestUtilityFunctions(t *testing.T) {
 			StaticDir: tempDir,
 			URLPrefix: "/web/",
 		}
-		
+
 		mux, err := CreateMuxWithWebHandler(server, config)
 		if err != nil {
 			t.Errorf("CreateMuxWithWebHandler failed: %v", err)
@@ -502,12 +502,12 @@ func TestUtilityFunctions(t *testing.T) {
 		if mux == nil {
 			t.Errorf("Expected mux but got nil")
 		}
-		
+
 		// Test that the mux routes correctly
 		req := httptest.NewRequest("GET", "/", nil)
 		w := httptest.NewRecorder()
 		mux.ServeHTTP(w, req)
-		
+
 		// Should redirect to web interface
 		if w.Code != http.StatusFound {
 			t.Errorf("Expected redirect status 302, got %d", w.Code)
@@ -525,21 +525,21 @@ func createTestServer(t *testing.T) *Server {
 			Version:     "test",
 		},
 	}
-	
+
 	manager, err := NewTorrentManager(config)
 	if err != nil {
 		t.Fatalf("Failed to create torrent manager: %v", err)
 	}
-	
+
 	serverConfig := ServerConfig{
 		TorrentManager: manager,
 	}
-	
+
 	server, err := NewServer(serverConfig)
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
 	}
-	
+
 	return server
 }
 
@@ -551,23 +551,23 @@ func createTestServerWithAuth(t *testing.T, username, password string) *Server {
 			Version:     "test",
 		},
 	}
-	
+
 	manager, err := NewTorrentManager(config)
 	if err != nil {
 		t.Fatalf("Failed to create torrent manager: %v", err)
 	}
-	
+
 	serverConfig := ServerConfig{
 		TorrentManager: manager,
 		Username:       username,
 		Password:       password,
 	}
-	
+
 	server, err := NewServer(serverConfig)
 	if err != nil {
 		t.Fatalf("Failed to create server: %v", err)
 	}
-	
+
 	return server
 }
 
@@ -578,7 +578,7 @@ func createTestFiles(t *testing.T, dir string) {
 		"style.css":  "body { margin: 0; }",
 		"app.js":     "console.log('test');",
 	}
-	
+
 	for name, content := range files {
 		path := filepath.Join(dir, name)
 		err := os.WriteFile(path, []byte(content), 0644)
@@ -590,13 +590,13 @@ func createTestFiles(t *testing.T, dir string) {
 
 func checkSecurityHeaders(t *testing.T, headers http.Header) {
 	expectedHeaders := map[string]string{
-		"X-Content-Type-Options": "nosniff",
-		"X-Frame-Options":        "DENY",
-		"X-XSS-Protection":       "1; mode=block",
-		"Content-Security-Policy": "",  // Just check it exists
-		"Referrer-Policy":        "strict-origin-when-cross-origin",
+		"X-Content-Type-Options":  "nosniff",
+		"X-Frame-Options":         "DENY",
+		"X-XSS-Protection":        "1; mode=block",
+		"Content-Security-Policy": "", // Just check it exists
+		"Referrer-Policy":         "strict-origin-when-cross-origin",
 	}
-	
+
 	for header, expectedValue := range expectedHeaders {
 		value := headers.Get(header)
 		if value == "" {
@@ -613,7 +613,7 @@ func checkCacheHeaders(t *testing.T, headers http.Header, fileExt string) {
 		t.Errorf("Expected Cache-Control header to be set")
 		return
 	}
-	
+
 	// Different cache policies for different file types
 	switch fileExt {
 	case ".html", ".htm":
@@ -632,20 +632,20 @@ func checkCacheHeaders(t *testing.T, headers http.Header, fileExt string) {
 func BenchmarkWebHandlerServeFile(b *testing.B) {
 	tempDir := b.TempDir()
 	createTestFiles(&testing.T{}, tempDir)
-	
+
 	server := createTestServer(&testing.T{})
 	config := WebHandlerConfig{
 		StaticDir: tempDir,
 		URLPrefix: "/web/",
 	}
-	
+
 	handler, err := NewWebHandler(config, server)
 	if err != nil {
 		b.Fatalf("Failed to create web handler: %v", err)
 	}
-	
+
 	req := httptest.NewRequest("GET", "/test.txt", nil)
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		w := httptest.NewRecorder()
@@ -658,7 +658,7 @@ func BenchmarkMimeTypeDetection(b *testing.B) {
 		"index.html", "style.css", "app.js", "data.json",
 		"image.png", "photo.jpg", "icon.svg", "file.txt",
 	}
-	
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		for _, filename := range filenames {
