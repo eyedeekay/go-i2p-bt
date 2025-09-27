@@ -244,7 +244,42 @@ func CreateMuxWithWebHandler(rpcServer *Server, webConfig WebHandlerConfig) (htt
 	return mux, nil
 }
 
-// Utility functions for common web handler setups
+// CreateMuxWithWebSocketSupport creates an HTTP multiplexer that includes WebSocket support
+// This extends the basic web handler with real-time WebSocket communication
+func CreateMuxWithWebSocketSupport(rpcServer *Server, webConfig WebHandlerConfig, wsConfig WebSocketConfig) (http.Handler, *WebSocketHandler, error) {
+	webHandler, err := NewWebHandler(webConfig, rpcServer)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create web handler: %w", err)
+	}
+
+	wsHandler, err := NewWebSocketHandler(wsConfig, rpcServer)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create websocket handler: %w", err)
+	}
+
+	// Create multiplexer that routes requests appropriately
+	mux := http.NewServeMux()
+
+	// Handle RPC requests at /transmission/rpc
+	mux.Handle("/transmission/rpc", rpcServer)
+
+	// Handle WebSocket requests at /ws
+	mux.Handle("/ws", wsHandler)
+
+	// Handle web interface requests at the configured prefix
+	mux.Handle(webConfig.URLPrefix, http.StripPrefix(strings.TrimSuffix(webConfig.URLPrefix, "/"), webHandler))
+
+	// Handle root redirect to web interface for convenience
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/" {
+			http.Redirect(w, r, webConfig.URLPrefix, http.StatusFound)
+			return
+		}
+		http.NotFound(w, r)
+	})
+
+	return mux, wsHandler, nil
+} // Utility functions for common web handler setups
 
 // NewDefaultWebHandler creates a web handler with sensible defaults
 func NewDefaultWebHandler(staticDir string, server *Server) (*WebHandler, error) {
