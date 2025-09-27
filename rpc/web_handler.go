@@ -244,8 +244,42 @@ func CreateMuxWithWebHandler(rpcServer *Server, webConfig WebHandlerConfig) (htt
 	return mux, nil
 }
 
-// CreateMuxWithWebSocketSupport creates an HTTP multiplexer that includes WebSocket support
-// This extends the basic web handler with real-time WebSocket communication
+// CreateMuxWithWebSocketSupport creates an HTTP multiplexer with integrated WebSocket support.
+//
+// This function provides a unified HTTP handler that serves both static web content
+// and WebSocket connections for real-time updates. It's designed to simplify
+// deployment by providing a single endpoint that handles all web interface needs.
+//
+// The resulting multiplexer routes requests as follows:
+//   - /ws: WebSocket endpoint for real-time torrent and session updates
+//   - All other paths: Static file serving from the configured directory
+//
+// Parameters:
+//   - rpcServer: *Server instance for authentication and torrent data access
+//   - webConfig: WebHandlerConfig for static file serving configuration
+//   - wsConfig: WebSocketConfig for WebSocket behavior and security settings
+//
+// Returns:
+//   - http.Handler: Configured multiplexer ready for HTTP server integration
+//   - *WebSocketHandler: WebSocket handler instance for programmatic access
+//   - error: Configuration or initialization error
+//
+// Example:
+//	webConfig := WebHandlerConfig{
+//		StaticDir: "./web",
+//		URLPrefix: "/",
+//	}
+//	wsConfig := WebSocketConfig{
+//		RequireAuth: true,
+//		UpdateInterval: 2 * time.Second,
+//	}
+//	mux, wsHandler, err := CreateMuxWithWebSocketSupport(server, webConfig, wsConfig)
+//	if err != nil {
+//		log.Fatal(err)
+//	}
+//	defer wsHandler.Close()
+//	
+//	log.Fatal(http.ListenAndServe(":8080", mux))
 func CreateMuxWithWebSocketSupport(rpcServer *Server, webConfig WebHandlerConfig, wsConfig WebSocketConfig) (http.Handler, *WebSocketHandler, error) {
 	webHandler, err := NewWebHandler(webConfig, rpcServer)
 	if err != nil {
