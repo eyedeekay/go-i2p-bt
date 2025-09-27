@@ -793,13 +793,13 @@ func (m *RPCMethods) updateTorrentLocation(torrent *TorrentState, location strin
 	if move {
 		// Use FileManager to move files physically
 		fileManager := NewFileManager()
-		
+
 		// Get torrent metainfo for file operations
 		metaInfo, err := torrent.MetaInfo.Info()
 		if err != nil {
 			return fmt.Errorf("failed to get torrent info for file moving: %w", err)
 		}
-		
+
 		// Move files from old location to new location
 		oldLocation := torrent.DownloadDir
 		if err := fileManager.MoveFiles(metaInfo, oldLocation, location, true); err != nil {

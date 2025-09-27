@@ -81,7 +81,7 @@ func (fm *FileManager) MoveFiles(info metainfo.Info, sourceDir, destDir string, 
 	if info.IsDir() {
 		sourcePath = filepath.Join(sourceDir, info.Name)
 	} else {
-		// Single file torrent - file name comes from info.Name  
+		// Single file torrent - file name comes from info.Name
 		sourcePath = filepath.Join(sourceDir, info.Name)
 	}
 
@@ -90,7 +90,7 @@ func (fm *FileManager) MoveFiles(info metainfo.Info, sourceDir, destDir string, 
 		for _, file := range info.Files {
 			// file.Path(info) already includes the torrent name for multi-file torrents
 			srcFile := filepath.Join(sourceDir, file.Path(info))
-			
+
 			var destFile string
 			if preserveStructure {
 				destFile = filepath.Join(destDir, file.Path(info))
@@ -118,11 +118,11 @@ func (fm *FileManager) MoveFiles(info metainfo.Info, sourceDir, destDir string, 
 	} else {
 		// Single file torrent
 		destFile := filepath.Join(destDir, info.Name)
-		
+
 		if err := fm.moveFile(sourcePath, destFile); err != nil {
 			return fmt.Errorf("failed to move single file %s: %w", sourcePath, err)
 		}
-		
+
 		movedFiles = append(movedFiles, struct{ source, dest string }{sourcePath, destFile})
 	}
 
@@ -205,12 +205,12 @@ func (fm *FileManager) CheckDiskSpace(path string, requiredBytes int64) error {
 
 	// Calculate available space in bytes
 	availableBytes := int64(stat.Bavail) * int64(stat.Bsize)
-	
+
 	// Check if we have enough space for the required bytes plus minimum free space
 	totalRequired := requiredBytes + fm.minimumFreeSpace
-	
+
 	if availableBytes < totalRequired {
-		return fmt.Errorf("insufficient disk space: need %d bytes, have %d bytes (minimum %d bytes must remain free)", 
+		return fmt.Errorf("insufficient disk space: need %d bytes, have %d bytes (minimum %d bytes must remain free)",
 			requiredBytes, availableBytes-fm.minimumFreeSpace, fm.minimumFreeSpace)
 	}
 
@@ -226,7 +226,7 @@ func (fm *FileManager) GetDiskSpace(path string) (total, available int64, err er
 
 	total = int64(stat.Blocks) * int64(stat.Bsize)
 	available = int64(stat.Bavail) * int64(stat.Bsize)
-	
+
 	return total, available, nil
 }
 
@@ -246,10 +246,10 @@ func (fm *FileManager) VerifyFile(filePath string, expectedHash []byte) error {
 	}
 
 	actualHash := hasher.Sum(nil)
-	
+
 	// Compare hashes
 	if len(actualHash) != len(expectedHash) {
-		return fmt.Errorf("hash length mismatch: expected %d bytes, got %d bytes", 
+		return fmt.Errorf("hash length mismatch: expected %d bytes, got %d bytes",
 			len(expectedHash), len(actualHash))
 	}
 
@@ -295,7 +295,7 @@ func (fm *FileManager) CleanupPartialFiles(directory string, info metainfo.Info)
 		// Multi-file torrent
 		// file.Path(info) already includes the torrent name for multi-file torrents
 		for _, file := range info.Files {
-			partialPath := filepath.Join(directory, file.Path(info) + ".part")
+			partialPath := filepath.Join(directory, file.Path(info)+".part")
 			if _, err := os.Stat(partialPath); err == nil {
 				// File exists, remove it
 				if err := os.Remove(partialPath); err != nil {
@@ -305,7 +305,7 @@ func (fm *FileManager) CleanupPartialFiles(directory string, info metainfo.Info)
 		}
 	} else {
 		// Single file torrent
-		partialPath := filepath.Join(directory, info.Name + ".part")
+		partialPath := filepath.Join(directory, info.Name+".part")
 		if _, err := os.Stat(partialPath); err == nil {
 			if err := os.Remove(partialPath); err != nil {
 				return fmt.Errorf("failed to remove partial file %s: %w", partialPath, err)
@@ -346,10 +346,10 @@ func (fm *FileManager) ValidateFileName(fileName string) error {
 	}
 
 	// Check for reserved names on Windows (for cross-platform compatibility)
-	reservedNames := []string{"CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", 
-		"COM5", "COM6", "COM7", "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", 
+	reservedNames := []string{"CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4",
+		"COM5", "COM6", "COM7", "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5",
 		"LPT6", "LPT7", "LPT8", "LPT9"}
-	
+
 	upperFileName := strings.ToUpper(fileName)
 	for _, reserved := range reservedNames {
 		if upperFileName == reserved || strings.HasPrefix(upperFileName, reserved+".") {

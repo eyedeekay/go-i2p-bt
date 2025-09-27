@@ -28,8 +28,8 @@ func TestNewFileManager(t *testing.T) {
 // TestSetMinimumFreeSpace validates minimum free space configuration
 func TestSetMinimumFreeSpace(t *testing.T) {
 	fm := NewFileManager()
-	
-	testValues := []int64{0, 1024, 50*1024*1024, 1024*1024*1024}
+
+	testValues := []int64{0, 1024, 50 * 1024 * 1024, 1024 * 1024 * 1024}
 	for _, value := range testValues {
 		fm.SetMinimumFreeSpace(value)
 		if fm.minimumFreeSpace != value {
@@ -238,7 +238,7 @@ func TestMoveFilesNonExistentSource(t *testing.T) {
 	info := metainfo.Info{
 		Name:        "test.txt",
 		Length:      4,
-		PieceLength: 16384, 
+		PieceLength: 16384,
 	}
 
 	err := fm.MoveFiles(info, "/non/existent/source", destDir, true)
@@ -273,7 +273,7 @@ func TestVerifyFile(t *testing.T) {
 	}
 
 	// Verify with incorrect hash
-	wrongHash := make([]byte, 20)  // Wrong hash (all zeros)
+	wrongHash := make([]byte, 20) // Wrong hash (all zeros)
 	err = fm.VerifyFile(testFile, wrongHash)
 	if err == nil {
 		t.Error("VerifyFile should fail with incorrect hash")
@@ -349,7 +349,7 @@ func TestRenamePartialFileErrors(t *testing.T) {
 		t.Fatalf("Failed to create partial file: %v", err)
 	}
 	if err := os.WriteFile(finalFile, []byte("existing"), 0644); err != nil {
-		t.Fatalf("Failed to create final file: %v", err) 
+		t.Fatalf("Failed to create final file: %v", err)
 	}
 
 	err = fm.RenamePartialFile(partialFile, finalFile)
@@ -374,7 +374,7 @@ func TestCleanupPartialFiles(t *testing.T) {
 		}
 
 		info := metainfo.Info{
-			Name:        "single.txt", 
+			Name:        "single.txt",
 			Length:      7,
 			PieceLength: 16384,
 		}
@@ -449,9 +449,9 @@ func TestNotifyFileComplete(t *testing.T) {
 
 	testPath := "/test/file.txt"
 	beforeCall := time.Now()
-	
+
 	fm.NotifyFileComplete(testPath, callback)
-	
+
 	afterCall := time.Now()
 
 	if !callbackCalled {
