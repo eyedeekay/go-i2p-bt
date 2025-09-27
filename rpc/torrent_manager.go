@@ -378,7 +378,7 @@ func (tm *TorrentManager) AddTorrent(req TorrentAddRequest) (*TorrentState, erro
 
 	// Create a snapshot of torrent state for script hook to avoid race conditions
 	torrentSnapshot := *torrentState
-	
+
 	// Execute torrent-added script hook
 	go func() {
 		if err := tm.scriptManager.ExecuteHook(ScriptHookTorrentAdded, &torrentSnapshot); err != nil {
@@ -1055,7 +1055,7 @@ func (tm *TorrentManager) startTorrent(torrent *TorrentState) {
 	// If we don't have metadata, request it through DHT and downloader
 	if torrent.MetaInfo == nil {
 		tm.log("Starting metadata download for torrent %s", torrent.InfoHash.HexString())
-		
+
 		// Use mutex to safely update torrent status
 		tm.mu.Lock()
 		torrent.Status = TorrentStatusQueuedVerify
@@ -1073,7 +1073,7 @@ func (tm *TorrentManager) startTorrent(torrent *TorrentState) {
 
 	// We have metadata, start the full download process
 	tm.log("Starting file download for torrent %s", torrent.InfoHash.HexString())
-	
+
 	// Use mutex to safely update torrent status
 	tm.mu.Lock()
 	torrent.Status = TorrentStatusDownloading
