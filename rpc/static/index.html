@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>go-i2p-bt RPC Server</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>go-i2p-bt RPC Server</h1>
+            <p class="subtitle">Transmission RPC Compatible BitTorrent Server</p>
+        </header>
+
+        <main>
+            <section class="info-panel">
+                <h2>Server Information</h2>
+                <div class="info-grid">
+                    <div class="info-item">
+                        <span class="label">Status:</span>
+                        <span class="value" id="server-status">Loading...</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="label">Session ID:</span>
+                        <span class="value" id="session-id">Loading...</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="label">Uptime:</span>
+                        <span class="value" id="uptime">Loading...</span>
+                    </div>
+                </div>
+            </section>
+
+            <section class="actions-panel">
+                <h2>RPC Information</h2>
+                <div class="action-buttons">
+                    <button id="refresh-stats" class="btn btn-primary">Refresh Statistics</button>
+                    <button id="test-connection" class="btn btn-secondary">Test RPC Connection</button>
+                </div>
+                <div class="rpc-info">
+                    <p><strong>RPC Endpoint:</strong> <code>/transmission/rpc</code></p>
+                    <p><strong>Protocol:</strong> Transmission RPC v17 Compatible</p>
+                    <p><strong>Authentication:</strong> <span id="auth-status">Checking...</span></p>
+                </div>
+            </section>
+
+            <section class="api-docs">
+                <h2>Quick API Reference</h2>
+                <div class="api-examples">
+                    <div class="api-example">
+                        <h3>Session Information</h3>
+                        <pre><code>curl -X POST http://localhost:9091/transmission/rpc \
+  -H "Content-Type: application/json" \
+  -d '{"method":"session-get","arguments":{}}'</code></pre>
+                    </div>
+                    <div class="api-example">
+                        <h3>List Torrents</h3>
+                        <pre><code>curl -X POST http://localhost:9091/transmission/rpc \
+  -H "Content-Type: application/json" \
+  -d '{"method":"torrent-get","arguments":{"fields":["id","name","status"]}}'</code></pre>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <footer>
+            <p>&copy; 2025 go-i2p BitTorrent Library - Licensed under Apache 2.0</p>
+        </footer>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
