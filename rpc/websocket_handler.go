@@ -450,18 +450,28 @@ func (h *WebSocketHandler) handleBroadcast() {
 	for {
 		select {
 		case message := <-h.broadcast:
-			h.clientsMu.RLock()
-			for _, client := range h.clients {
-				if h.checkClientSubscription(client, message.Type) {
-					if !h.sendMessageToClient(client, message) {
-						h.cleanupFailedClient(client)
-					}
-				}
-			}
-			h.clientsMu.RUnlock()
-
+			h.processBroadcastMessage(message)
 		case <-h.shutdown:
 			return
+		}
+	}
+}
+
+// processBroadcastMessage distributes a broadcast message to all subscribed clients
+func (h *WebSocketHandler) processBroadcastMessage(message WebSocketMessage) {
+	h.clientsMu.RLock()
+	defer h.clientsMu.RUnlock()
+	
+	for _, client := range h.clients {
+		h.handleClientMessage(client, message)
+	}
+}
+
+// handleClientMessage processes a message for a specific client, checking subscription and handling delivery
+func (h *WebSocketHandler) handleClientMessage(client *WebSocketClient, message WebSocketMessage) {
+	if h.checkClientSubscription(client, message.Type) {
+		if !h.sendMessageToClient(client, message) {
+			h.cleanupFailedClient(client)
 		}
 	}
 }
