@@ -729,16 +729,16 @@ func (tm *TorrentManager) GetSessionConfig() SessionConfiguration {
 	return config
 }
 
-// UpdateSessionConfig updates the session configuration
-func (tm *TorrentManager) UpdateSessionConfig(config SessionConfiguration) error {
-	tm.sessionMu.Lock()
-	defer tm.sessionMu.Unlock()
-
-	// Validate configuration
+// validatePortConfiguration validates peer port settings.
+func (tm *TorrentManager) validatePortConfiguration(config SessionConfiguration) error {
 	if config.PeerPort <= 0 || config.PeerPort > 65535 {
 		return fmt.Errorf("invalid peer port: %d", config.PeerPort)
 	}
+	return nil
+}
 
+// validatePeerLimits validates peer limit settings.
+func (tm *TorrentManager) validatePeerLimits(config SessionConfiguration) error {
 	if config.PeerLimitGlobal < 0 {
 		return fmt.Errorf("peer limit global cannot be negative: %d", config.PeerLimitGlobal)
 	}
@@ -746,7 +746,11 @@ func (tm *TorrentManager) UpdateSessionConfig(config SessionConfiguration) error
 	if config.PeerLimitPerTorrent < 0 {
 		return fmt.Errorf("peer limit per torrent cannot be negative: %d", config.PeerLimitPerTorrent)
 	}
+	return nil
+}
 
+// validateQueueSizes validates queue size settings.
+func (tm *TorrentManager) validateQueueSizes(config SessionConfiguration) error {
 	if config.DownloadQueueSize < 0 {
 		return fmt.Errorf("download queue size cannot be negative: %d", config.DownloadQueueSize)
 	}
@@ -754,7 +758,11 @@ func (tm *TorrentManager) UpdateSessionConfig(config SessionConfiguration) error
 	if config.SeedQueueSize < 0 {
 		return fmt.Errorf("seed queue size cannot be negative: %d", config.SeedQueueSize)
 	}
+	return nil
+}
 
+// validateDirectoryConfiguration validates and creates directory settings.
+func (tm *TorrentManager) validateDirectoryConfiguration(config SessionConfiguration) error {
 	// Validate and create download directory if necessary
 	if config.DownloadDir != "" {
 		if err := tm.validateAndCreateDownloadDir(config.DownloadDir); err != nil {
@@ -767,6 +775,39 @@ func (tm *TorrentManager) UpdateSessionConfig(config SessionConfiguration) error
 		if err := tm.validateAndCreateDownloadDir(config.IncompleteDir); err != nil {
 			return fmt.Errorf("invalid incomplete directory: %w", err)
 		}
+	}
+	return nil
+}
+
+// validateSessionConfiguration validates all session configuration parameters.
+func (tm *TorrentManager) validateSessionConfiguration(config SessionConfiguration) error {
+	if err := tm.validatePortConfiguration(config); err != nil {
+		return err
+	}
+
+	if err := tm.validatePeerLimits(config); err != nil {
+		return err
+	}
+
+	if err := tm.validateQueueSizes(config); err != nil {
+		return err
+	}
+
+	if err := tm.validateDirectoryConfiguration(config); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// UpdateSessionConfig updates the session configuration
+func (tm *TorrentManager) UpdateSessionConfig(config SessionConfiguration) error {
+	tm.sessionMu.Lock()
+	defer tm.sessionMu.Unlock()
+
+	// Validate configuration
+	if err := tm.validateSessionConfiguration(config); err != nil {
+		return err
 	}
 
 	// Store previous configuration for comparison
