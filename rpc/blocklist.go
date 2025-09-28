@@ -325,10 +325,8 @@ func (bm *BlocklistManager) ipInRange(ip net.IP, r ipRange) bool {
 	return bm.compareIPs(ip, r.start) >= 0 && bm.compareIPs(ip, r.end) <= 0
 }
 
-// compareIPs compares two IP addresses.
-// Returns -1 if a < b, 0 if a == b, 1 if a > b.
-func (bm *BlocklistManager) compareIPs(a, b net.IP) int {
-	// Ensure same length
+// normalizeIPAddresses ensures both IP addresses have the same format for comparison.
+func (bm *BlocklistManager) normalizeIPAddresses(a, b net.IP) (net.IP, net.IP) {
 	if len(a) != len(b) {
 		if len(a) == 4 && len(b) == 16 {
 			a = a.To16()
@@ -336,7 +334,11 @@ func (bm *BlocklistManager) compareIPs(a, b net.IP) int {
 			b = b.To16()
 		}
 	}
+	return a, b
+}
 
+// compareIPBytes performs byte-by-byte comparison of normalized IP addresses.
+func (bm *BlocklistManager) compareIPBytes(a, b net.IP) int {
 	for i := 0; i < len(a) && i < len(b); i++ {
 		if a[i] < b[i] {
 			return -1
@@ -345,15 +347,33 @@ func (bm *BlocklistManager) compareIPs(a, b net.IP) int {
 			return 1
 		}
 	}
+	return 0
+}
 
+// compareIPLengths compares IP address lengths when byte comparison is equal.
+func (bm *BlocklistManager) compareIPLengths(a, b net.IP) int {
 	if len(a) < len(b) {
 		return -1
 	}
 	if len(a) > len(b) {
 		return 1
 	}
-
 	return 0
+}
+
+// compareIPs compares two IP addresses.
+// Returns -1 if a < b, 0 if a == b, 1 if a > b.
+func (bm *BlocklistManager) compareIPs(a, b net.IP) int {
+	// Normalize IP addresses to same format
+	normalizedA, normalizedB := bm.normalizeIPAddresses(a, b)
+
+	// Compare bytes
+	if result := bm.compareIPBytes(normalizedA, normalizedB); result != 0 {
+		return result
+	}
+
+	// Compare lengths if bytes are equal
+	return bm.compareIPLengths(normalizedA, normalizedB)
 }
 
 // GetLastUpdated returns the time when the blocklist was last updated.
