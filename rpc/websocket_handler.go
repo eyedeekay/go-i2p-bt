@@ -69,6 +69,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/go-i2p/go-i2p-bt/metainfo"
 	"github.com/gorilla/websocket"
 )
 
@@ -496,43 +497,64 @@ func (h *WebSocketHandler) periodicUpdates() {
 
 // broadcastTorrentStats sends torrent status updates to subscribed clients
 func (h *WebSocketHandler) broadcastTorrentStats() {
-	if h.server == nil || h.server.config.TorrentManager == nil {
+	if !h.canBroadcastStats() {
 		return
 	}
 
-	// Get all torrents from the manager
 	torrents := h.server.config.TorrentManager.GetAllTorrents()
+	torrentData := h.convertTorrentsToData(torrents)
+	
+	h.sendTorrentStatsMessage(torrentData)
+}
 
-	// Convert to a format suitable for JSON
+// canBroadcastStats validates that the necessary components are available for broadcasting stats
+func (h *WebSocketHandler) canBroadcastStats() bool {
+	return h.server != nil && h.server.config.TorrentManager != nil
+}
+
+// convertTorrentsToData transforms torrent objects into a JSON-suitable format
+func (h *WebSocketHandler) convertTorrentsToData(torrents []*TorrentState) []map[string]interface{} {
 	torrentData := make([]map[string]interface{}, 0, len(torrents))
+	
 	for _, torrent := range torrents {
-		// Get torrent name from MetaInfo if available
-		var name string
-		if torrent.MetaInfo != nil {
-			if info, err := torrent.MetaInfo.Info(); err == nil {
-				name = info.Name
-			} else {
-				name = fmt.Sprintf("Torrent %d", torrent.ID)
-			}
-		} else {
-			name = fmt.Sprintf("Torrent %d", torrent.ID)
-		}
-
-		torrentData = append(torrentData, map[string]interface{}{
-			"id":             torrent.ID,
-			"name":           name,
-			"status":         torrent.Status,
-			"percentDone":    torrent.PercentDone,
-			"rateDownload":   torrent.DownloadRate,
-			"rateUpload":     torrent.UploadRate,
-			"eta":            torrent.ETA,
-			"peersConnected": torrent.PeerConnectedCount,
-			"downloaded":     torrent.Downloaded,
-			"uploaded":       torrent.Uploaded,
-			"left":           torrent.Left,
-		})
+		data := h.extractTorrentData(torrent)
+		torrentData = append(torrentData, data)
 	}
+	
+	return torrentData
+}
 
+// extractTorrentData creates a data map for a single torrent with all relevant statistics
+func (h *WebSocketHandler) extractTorrentData(torrent *TorrentState) map[string]interface{} {
+	name := h.resolveTorrentName(torrent.MetaInfo, int(torrent.ID))
+	
+	return map[string]interface{}{
+		"id":             torrent.ID,
+		"name":           name,
+		"status":         torrent.Status,
+		"percentDone":    torrent.PercentDone,
+		"rateDownload":   torrent.DownloadRate,
+		"rateUpload":     torrent.UploadRate,
+		"eta":            torrent.ETA,
+		"peersConnected": torrent.PeerConnectedCount,
+		"downloaded":     torrent.Downloaded,
+		"uploaded":       torrent.Uploaded,
+		"left":           torrent.Left,
+	}
+}
+
+// resolveTorrentName determines the display name for a torrent from its metadata or defaults to ID
+func (h *WebSocketHandler) resolveTorrentName(metaInfo *metainfo.MetaInfo, torrentID int) string {
+	if metaInfo != nil {
+		if info, err := metaInfo.Info(); err == nil {
+			return info.Name
+		}
+	}
+	return fmt.Sprintf("Torrent %d", torrentID)
+}
+
+// sendTorrentStatsMessage broadcasts the torrent statistics to all subscribed clients
+func (h *WebSocketHandler) sendTorrentStatsMessage(torrentData []map[string]interface{}) {
 	msg := WebSocketMessage{
 		Type: "torrent-stats",
 		Data: torrentData,
