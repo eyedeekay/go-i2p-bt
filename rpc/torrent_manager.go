@@ -1183,34 +1183,58 @@ func (tm *TorrentManager) findPeersViaDHT(torrent *TorrentState) {
 
 	// Use DHT GetPeers to find peers storing this torrent
 	tm.dhtServer.GetPeers(torrent.InfoHash, func(result dht.Result) {
-		if result.Code != 0 {
-			tm.log("DHT peer discovery failed for %s: %s", torrent.InfoHash.HexString(), result.Reason)
-			return
-		}
-
-		if result.Timeout {
-			tm.log("DHT peer discovery timeout for %s", torrent.InfoHash.HexString())
-			return
-		}
-
-		if len(result.Peers) > 0 {
-			tm.log("DHT found %d peers for torrent %s", len(result.Peers), torrent.InfoHash.HexString())
-
-			// If we don't have metadata yet, try to download it from these peers
-			if torrent.MetaInfo == nil {
-				for _, peer := range result.Peers {
-					if peer.Port > 0 && peer.Port < 65535 {
-						go tm.requestMetadataFromPeer(torrent, peer)
-					}
-				}
-			} else {
-				// Update peer list for active torrent
-				tm.updateTorrentPeers(torrent, result.Peers)
-			}
-		} else {
-			tm.log("No peers found via DHT for torrent %s", torrent.InfoHash.HexString())
-		}
+		tm.handleDHTResult(torrent, result)
 	})
+}
+
+// handleDHTResult processes the DHT query result for peer discovery.
+func (tm *TorrentManager) handleDHTResult(torrent *TorrentState, result dht.Result) {
+	if !tm.validateDHTResult(torrent, result) {
+		return
+	}
+
+	if len(result.Peers) > 0 {
+		tm.processDHTPeers(torrent, result.Peers)
+	} else {
+		tm.log("No peers found via DHT for torrent %s", torrent.InfoHash.HexString())
+	}
+}
+
+// validateDHTResult checks if the DHT result is valid and logs appropriate messages.
+func (tm *TorrentManager) validateDHTResult(torrent *TorrentState, result dht.Result) bool {
+	if result.Code != 0 {
+		tm.log("DHT peer discovery failed for %s: %s", torrent.InfoHash.HexString(), result.Reason)
+		return false
+	}
+
+	if result.Timeout {
+		tm.log("DHT peer discovery timeout for %s", torrent.InfoHash.HexString())
+		return false
+	}
+
+	return true
+}
+
+// processDHTPeers handles the discovered peers based on torrent metadata availability.
+func (tm *TorrentManager) processDHTPeers(torrent *TorrentState, peers []metainfo.Address) {
+	tm.log("DHT found %d peers for torrent %s", len(peers), torrent.InfoHash.HexString())
+
+	// If we don't have metadata yet, try to download it from these peers
+	if torrent.MetaInfo == nil {
+		tm.requestMetadataFromDHTPeers(torrent, peers)
+	} else {
+		// Update peer list for active torrent
+		tm.updateTorrentPeers(torrent, peers)
+	}
+}
+
+// requestMetadataFromDHTPeers initiates metadata requests to valid DHT peers.
+func (tm *TorrentManager) requestMetadataFromDHTPeers(torrent *TorrentState, peers []metainfo.Address) {
+	for _, peer := range peers {
+		if peer.Port > 0 && peer.Port < 65535 {
+			go tm.requestMetadataFromPeer(torrent, peer)
+		}
+	}
 }
 
 // requestMetadataFromPeer attempts to download metadata from a specific peer
