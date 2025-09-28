@@ -243,25 +243,36 @@ func (sm *ScriptManager) validateScriptFile(filename string) error {
 func (sm *ScriptManager) buildTorrentEnvironment(torrent *TorrentState, customEnv map[string]string) []string {
 	env := os.Environ() // Start with system environment
 
-	// Add Transmission-compatible torrent information
-	torrentVars := map[string]string{
+	torrentVars := sm.createBasicTorrentVars(torrent)
+	sm.addMetaInfoVars(torrent, torrentVars)
+	sm.addStatusVars(torrent, torrentVars)
+	sm.addCustomVars(customEnv, torrentVars)
+
+	return sm.formatEnvironmentVars(env, torrentVars)
+}
+
+// createBasicTorrentVars creates the fundamental torrent environment variables
+func (sm *ScriptManager) createBasicTorrentVars(torrent *TorrentState) map[string]string {
+	return map[string]string{
 		"TR_TORRENT_ID":     strconv.FormatInt(torrent.ID, 10),
 		"TR_TORRENT_DIR":    torrent.DownloadDir,
 		"TR_TIME_LOCALTIME": strconv.FormatInt(time.Now().Unix(), 10),
+		"TR_TORRENT_HASH":   fmt.Sprintf("%x", torrent.InfoHash[:]),
 	}
+}
 
-	// Add optional fields if available
+// addMetaInfoVars extracts and adds torrent metadata information to environment variables
+func (sm *ScriptManager) addMetaInfoVars(torrent *TorrentState, torrentVars map[string]string) {
 	if torrent.MetaInfo != nil {
 		if info, err := torrent.MetaInfo.Info(); err == nil {
 			torrentVars["TR_TORRENT_NAME"] = info.Name
 			torrentVars["TR_TORRENT_SIZE"] = strconv.FormatInt(info.TotalLength(), 10)
 		}
 	}
+}
 
-	// Add info hash as hex string
-	torrentVars["TR_TORRENT_HASH"] = fmt.Sprintf("%x", torrent.InfoHash[:])
-
-	// Add status-specific information
+// addStatusVars adds torrent status and progress information to environment variables
+func (sm *ScriptManager) addStatusVars(torrent *TorrentState, torrentVars map[string]string) {
 	if torrent.Status > 0 {
 		torrentVars["TR_TORRENT_STATUS"] = strconv.FormatInt(torrent.Status, 10)
 	}
@@ -270,21 +281,23 @@ func (sm *ScriptManager) buildTorrentEnvironment(torrent *TorrentState, customEn
 		torrentVars["TR_TORRENT_PERCENT_DONE"] = fmt.Sprintf("%.2f", torrent.PercentDone)
 	}
 
-	// Calculate completed bytes from download progress
 	if torrent.Downloaded > 0 {
 		torrentVars["TR_TORRENT_BYTES_COMPLETED"] = strconv.FormatInt(torrent.Downloaded, 10)
 	}
+}
 
-	// Add custom environment variables (override system/torrent vars if specified)
+// addCustomVars merges custom environment variables, allowing overrides of system/torrent vars
+func (sm *ScriptManager) addCustomVars(customEnv, torrentVars map[string]string) {
 	for key, value := range customEnv {
 		torrentVars[key] = value
 	}
+}
 
-	// Convert to environment slice format
+// formatEnvironmentVars converts the torrent variables map to environment slice format
+func (sm *ScriptManager) formatEnvironmentVars(env []string, torrentVars map[string]string) []string {
 	for key, value := range torrentVars {
 		env = append(env, fmt.Sprintf("%s=%s", key, value))
 	}
-
 	return env
 }
 
