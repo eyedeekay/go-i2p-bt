@@ -503,7 +503,7 @@ func (h *WebSocketHandler) broadcastTorrentStats() {
 
 	torrents := h.server.config.TorrentManager.GetAllTorrents()
 	torrentData := h.convertTorrentsToData(torrents)
-	
+
 	h.sendTorrentStatsMessage(torrentData)
 }
 
@@ -515,19 +515,19 @@ func (h *WebSocketHandler) canBroadcastStats() bool {
 // convertTorrentsToData transforms torrent objects into a JSON-suitable format
 func (h *WebSocketHandler) convertTorrentsToData(torrents []*TorrentState) []map[string]interface{} {
 	torrentData := make([]map[string]interface{}, 0, len(torrents))
-	
+
 	for _, torrent := range torrents {
 		data := h.extractTorrentData(torrent)
 		torrentData = append(torrentData, data)
 	}
-	
+
 	return torrentData
 }
 
 // extractTorrentData creates a data map for a single torrent with all relevant statistics
 func (h *WebSocketHandler) extractTorrentData(torrent *TorrentState) map[string]interface{} {
 	name := h.resolveTorrentName(torrent.MetaInfo, int(torrent.ID))
-	
+
 	return map[string]interface{}{
 		"id":             torrent.ID,
 		"name":           name,
