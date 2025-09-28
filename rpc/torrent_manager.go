@@ -1620,47 +1620,66 @@ func (tm *TorrentManager) countReceivingPeers(torrent *TorrentState) int64 {
 // ResolveTorrentIDs resolves a list of torrent identifiers to actual torrent IDs
 func (tm *TorrentManager) ResolveTorrentIDs(ids []interface{}) ([]int64, error) {
 	if len(ids) == 0 {
-		// Return all torrent IDs
-		tm.mu.RLock()
-		defer tm.mu.RUnlock()
-
-		result := make([]int64, 0, len(tm.torrents))
-		for id := range tm.torrents {
-			result = append(result, id)
-		}
-		return result, nil
+		return tm.getAllTorrentIDs(), nil
 	}
 
+	return tm.processIdentifierList(ids)
+}
+
+// getAllTorrentIDs returns all available torrent IDs from the manager.
+func (tm *TorrentManager) getAllTorrentIDs() []int64 {
+	tm.mu.RLock()
+	defer tm.mu.RUnlock()
+
+	result := make([]int64, 0, len(tm.torrents))
+	for id := range tm.torrents {
+		result = append(result, id)
+	}
+	return result
+}
+
+// processIdentifierList processes a list of identifiers and converts them to torrent IDs.
+func (tm *TorrentManager) processIdentifierList(ids []interface{}) ([]int64, error) {
 	var result []int64
 
 	for _, id := range ids {
-		switch v := id.(type) {
-		case float64:
-			// JSON numbers are parsed as float64
-			result = append(result, int64(v))
-		case int64:
-			result = append(result, v)
-		case int:
-			result = append(result, int64(v))
-		case string:
-			if v == "recently-active" {
-				// Return torrents that have been active recently
-				recentIDs := tm.getRecentlyActiveTorrents()
-				result = append(result, recentIDs...)
-			} else {
-				// Assume it's a hash string
-				torrent, err := tm.GetTorrentByHash(v)
-				if err != nil {
-					return nil, fmt.Errorf("torrent not found: %s", v)
-				}
-				result = append(result, torrent.ID)
-			}
-		default:
-			return nil, fmt.Errorf("invalid torrent ID type: %T", id)
+		resolvedIDs, err := tm.convertSingleIdentifier(id)
+		if err != nil {
+			return nil, err
 		}
+		result = append(result, resolvedIDs...)
 	}
 
 	return result, nil
+}
+
+// convertSingleIdentifier converts a single identifier to one or more torrent IDs.
+func (tm *TorrentManager) convertSingleIdentifier(id interface{}) ([]int64, error) {
+	switch v := id.(type) {
+	case float64:
+		return []int64{int64(v)}, nil
+	case int64:
+		return []int64{v}, nil
+	case int:
+		return []int64{int64(v)}, nil
+	case string:
+		return tm.resolveStringIdentifier(v)
+	default:
+		return nil, fmt.Errorf("invalid torrent ID type: %T", id)
+	}
+}
+
+// resolveStringIdentifier resolves string identifiers like "recently-active" or hash strings.
+func (tm *TorrentManager) resolveStringIdentifier(v string) ([]int64, error) {
+	if v == "recently-active" {
+		return tm.getRecentlyActiveTorrents(), nil
+	}
+
+	torrent, err := tm.GetTorrentByHash(v)
+	if err != nil {
+		return nil, fmt.Errorf("torrent not found: %s", v)
+	}
+	return []int64{torrent.ID}, nil
 }
 
 // getRecentlyActiveTorrents returns IDs of torrents that have been active recently
