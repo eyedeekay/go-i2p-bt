@@ -108,49 +108,60 @@ func (sm *ScriptManager) GetHookConfig(hookType ScriptHookType) (*ScriptHookConf
 	return config, exists
 }
 
-// ExecuteHook executes a script hook for the given torrent lifecycle event
-// It passes torrent information as environment variables following Transmission patterns
-func (sm *ScriptManager) ExecuteHook(hookType ScriptHookType, torrent *TorrentState) error {
+// validateHookConfiguration checks if the hook is properly configured and enabled.
+func (sm *ScriptManager) validateHookConfiguration(hookType ScriptHookType) (*ScriptHookConfig, error) {
 	sm.mu.RLock()
 	config, exists := sm.hooks[hookType]
 	sm.mu.RUnlock()
 
 	if !exists || !config.Enabled || config.Filename == "" {
-		return nil // Hook not configured or disabled
+		return nil, nil // Hook not configured or disabled - not an error
 	}
 
 	// Validate script file exists and is executable
 	if err := sm.validateScriptFile(config.Filename); err != nil {
-		return fmt.Errorf("script validation failed: %w", err)
+		return nil, fmt.Errorf("script validation failed: %w", err)
 	}
 
-	// Build environment variables with torrent information
-	env := sm.buildTorrentEnvironment(torrent, config.Environment)
+	return config, nil
+}
 
-	// Execute script with timeout
-	ctx, cancel := context.WithTimeout(context.Background(), config.Timeout)
-	defer cancel()
-
-	if sm.logger != nil {
-		name := "unknown"
-		if torrent.MetaInfo != nil {
-			if info, err := torrent.MetaInfo.Info(); err == nil {
-				name = info.Name
-			}
+// getTorrentName safely extracts the torrent name for logging purposes.
+func (sm *ScriptManager) getTorrentName(torrent *TorrentState) string {
+	if torrent.MetaInfo != nil {
+		if info, err := torrent.MetaInfo.Info(); err == nil {
+			return info.Name
 		}
+	}
+	return "unknown"
+}
+
+// logScriptExecution logs the start of script execution if logger is configured.
+func (sm *ScriptManager) logScriptExecution(hookType ScriptHookType, config *ScriptHookConfig, torrent *TorrentState) {
+	if sm.logger != nil {
+		name := sm.getTorrentName(torrent)
 		sm.logger("Executing %s script: %s for torrent %d (%s)",
 			hookType, config.Filename, torrent.ID, name)
 	}
+}
+
+// executeScriptWithTimeout runs the script with the configured timeout and environment.
+func (sm *ScriptManager) executeScriptWithTimeout(config *ScriptHookConfig, env []string) ([]byte, time.Duration, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), config.Timeout)
+	defer cancel()
 
 	cmd := exec.CommandContext(ctx, config.Filename)
 	cmd.Env = env
 
-	// Start execution
 	start := time.Now()
 	output, err := cmd.CombinedOutput()
 	duration := time.Since(start)
 
-	// Log execution result
+	return output, duration, err
+}
+
+// logScriptResult logs the execution result if logger is configured.
+func (sm *ScriptManager) logScriptResult(config *ScriptHookConfig, output []byte, duration time.Duration, err error) {
 	if sm.logger != nil {
 		if err != nil {
 			sm.logger("Script %s failed after %v: %v\nOutput: %s",
@@ -160,6 +171,31 @@ func (sm *ScriptManager) ExecuteHook(hookType ScriptHookType, torrent *TorrentSt
 				config.Filename, duration)
 		}
 	}
+}
+
+// ExecuteHook executes a script hook for the given torrent lifecycle event
+// It passes torrent information as environment variables following Transmission patterns
+func (sm *ScriptManager) ExecuteHook(hookType ScriptHookType, torrent *TorrentState) error {
+	// Validate hook configuration
+	config, err := sm.validateHookConfiguration(hookType)
+	if err != nil {
+		return err
+	}
+	if config == nil {
+		return nil // Hook not configured or disabled
+	}
+
+	// Build environment variables with torrent information
+	env := sm.buildTorrentEnvironment(torrent, config.Environment)
+
+	// Log script execution start
+	sm.logScriptExecution(hookType, config, torrent)
+
+	// Execute script with timeout
+	output, duration, err := sm.executeScriptWithTimeout(config, env)
+
+	// Log execution result
+	sm.logScriptResult(config, output, duration, err)
 
 	if err != nil {
 		return fmt.Errorf("script execution failed: %w", err)
