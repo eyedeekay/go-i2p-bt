@@ -1441,7 +1441,7 @@ func (tm *TorrentManager) updateCompletionStatistics(torrent *TorrentState) {
 	if torrent.MetaInfo == nil {
 		return
 	}
-	
+
 	info, err := torrent.MetaInfo.Info()
 	if err != nil {
 		return
@@ -1463,7 +1463,7 @@ func (tm *TorrentManager) calculateBasicCompletionStats(torrent *TorrentState, i
 	if torrent.PercentDone > 1.0 {
 		torrent.PercentDone = 1.0
 	}
-	
+
 	torrent.Left = totalSize - torrent.Downloaded
 	if torrent.Left < 0 {
 		torrent.Left = 0
