@@ -362,6 +362,74 @@ func (m *RPCMethods) validateTorrentSetRequest(req TorrentActionRequest) error {
 	return nil
 }
 
+// applyQueuePositionChanges applies queue position updates to the torrent if applicable.
+func (m *RPCMethods) applyQueuePositionChanges(torrent *TorrentState, req TorrentActionRequest) error {
+	if req.QueuePosition >= 0 {
+		// Only update queue position if the torrent is already in a queue
+		// If not in queue, ignore the position setting (matches Transmission behavior)
+		currentPosition := m.manager.GetTorrentQueuePosition(torrent.ID)
+		if currentPosition >= 0 {
+			if err := m.manager.SetTorrentQueuePosition(torrent.ID, req.QueuePosition); err != nil {
+				return fmt.Errorf("queue position update failed: %v", err)
+			}
+		}
+		// If torrent is not in queue (currentPosition == -1), silently ignore the position setting
+	}
+	return nil
+}
+
+// applyTorrentLocationChanges applies location changes to the torrent if specified.
+func (m *RPCMethods) applyTorrentLocationChanges(torrent *TorrentState, req TorrentActionRequest) error {
+	if req.Location != "" {
+		if err := m.updateTorrentLocation(torrent, req.Location, req.Move); err != nil {
+			return fmt.Errorf("location update failed: %v", err)
+		}
+	}
+	return nil
+}
+
+// applyEssentialTorrentChanges applies all torrent modifications that require error handling.
+func (m *RPCMethods) applyEssentialTorrentChanges(torrent *TorrentState, req TorrentActionRequest) error {
+	// Initialize file arrays if needed based on MetaInfo
+	if err := m.ensureFileArraysInitialized(torrent); err != nil {
+		return fmt.Errorf("failed to initialize file arrays: %v", err)
+	}
+
+	// Apply queue position changes
+	if err := m.applyQueuePositionChanges(torrent, req); err != nil {
+		return err
+	}
+
+	// Apply file management changes
+	if err := m.applyFileManagementChanges(torrent, req); err != nil {
+		return err
+	}
+
+	// Apply tracker management
+	if err := m.updateTrackers(torrent, req); err != nil {
+		return fmt.Errorf("tracker update failed: %v", err)
+	}
+
+	// Apply location changes
+	if err := m.applyTorrentLocationChanges(torrent, req); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// applyNonEssentialTorrentChanges applies torrent modifications that do not require error handling.
+func (m *RPCMethods) applyNonEssentialTorrentChanges(torrent *TorrentState, req TorrentActionRequest) {
+	// Apply bandwidth priority updates
+	m.applyBandwidthPriorityChanges(torrent, req)
+
+	// Apply seeding configuration changes
+	m.applySeedingConfigurationChanges(torrent, req)
+
+	// Apply torrent metadata changes
+	m.applyTorrentMetadataChanges(torrent, req)
+}
+
 // applyTorrentChanges applies all requested configuration changes to a single torrent.
 // This function coordinates the application of different types of changes while maintaining
 // data consistency and proper error handling.
@@ -383,49 +451,13 @@ func (m *RPCMethods) validateTorrentSetRequest(req TorrentActionRequest) error {
 // Returns:
 //   - error: aggregated error message if any operation fails, nil on success
 func (m *RPCMethods) applyTorrentChanges(torrent *TorrentState, req TorrentActionRequest) error {
-	// Initialize file arrays if needed based on MetaInfo
-	if err := m.ensureFileArraysInitialized(torrent); err != nil {
-		return fmt.Errorf("failed to initialize file arrays: %v", err)
-	}
-
-	// Apply queue position changes
-	if req.QueuePosition >= 0 {
-		// Only update queue position if the torrent is already in a queue
-		// If not in queue, ignore the position setting (matches Transmission behavior)
-		currentPosition := m.manager.GetTorrentQueuePosition(torrent.ID)
-		if currentPosition >= 0 {
-			if err := m.manager.SetTorrentQueuePosition(torrent.ID, req.QueuePosition); err != nil {
-				return fmt.Errorf("queue position update failed: %v", err)
-			}
-		}
-		// If torrent is not in queue (currentPosition == -1), silently ignore the position setting
-	}
-
-	// Apply bandwidth priority updates
-	m.applyBandwidthPriorityChanges(torrent, req)
-
-	// Apply file management changes
-	if err := m.applyFileManagementChanges(torrent, req); err != nil {
+	// Apply essential changes that require error handling
+	if err := m.applyEssentialTorrentChanges(torrent, req); err != nil {
 		return err
 	}
 
-	// Apply seeding configuration changes
-	m.applySeedingConfigurationChanges(torrent, req)
-
-	// Apply torrent metadata changes
-	m.applyTorrentMetadataChanges(torrent, req)
-
-	// Apply tracker management
-	if err := m.updateTrackers(torrent, req); err != nil {
-		return fmt.Errorf("tracker update failed: %v", err)
-	}
-
-	// Apply location changes
-	if req.Location != "" {
-		if err := m.updateTorrentLocation(torrent, req.Location, req.Move); err != nil {
-			return fmt.Errorf("location update failed: %v", err)
-		}
-	}
+	// Apply non-essential changes that do not require error handling
+	m.applyNonEssentialTorrentChanges(torrent, req)
 
 	return nil
 }
