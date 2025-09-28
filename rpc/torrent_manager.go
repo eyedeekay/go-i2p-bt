@@ -1482,7 +1482,9 @@ func (tm *TorrentManager) handleCompletionStateChange(torrent *TorrentState) {
 	isComplete := torrent.PercentDone >= 1.0
 	if !torrent.wasComplete && isComplete {
 		torrent.wasComplete = true
-		go tm.executeTorrentDoneHook(torrent)
+		// Create a snapshot of torrent state for script hook to avoid race conditions  
+		torrentSnapshot := *torrent
+		go tm.executeTorrentDoneHook(&torrentSnapshot)
 	}
 }
 
@@ -1490,6 +1492,8 @@ func (tm *TorrentManager) handleCompletionStateChange(torrent *TorrentState) {
 func (tm *TorrentManager) executeTorrentDoneHook(torrent *TorrentState) {
 	if err := tm.scriptManager.ExecuteHook(ScriptHookTorrentDone, torrent); err != nil {
 		tm.log("Failed to execute torrent-done script for torrent %d: %v", torrent.ID, err)
+	} else {
+		tm.log("Successfully executed torrent-done script for torrent %d", torrent.ID)
 	}
 }
 

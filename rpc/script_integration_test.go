@@ -25,6 +25,7 @@ import (
 
 	"github.com/go-i2p/go-i2p-bt/dht"
 	"github.com/go-i2p/go-i2p-bt/downloader"
+	"github.com/go-i2p/go-i2p-bt/metainfo"
 )
 
 // createIntegrationTestScript creates a script that writes execution details to a file
@@ -150,19 +151,22 @@ func TestTorrentManager_ScriptHooks_TorrentAdded(t *testing.T) {
 }
 
 func TestTorrentManager_ScriptHooks_TorrentCompleted(t *testing.T) {
-	tm := createTestTorrentManager(t)
-	defer tm.Close()
-
 	// Create output file for script execution verification
 	outputFile := filepath.Join(t.TempDir(), "completion_script_output.txt")
 	scriptPath := createIntegrationTestScript(t, outputFile)
 
-	// Configure torrent-done script
-	tm.scriptManager.UpdateHookConfig(ScriptHookTorrentDone, &ScriptHookConfig{
-		Enabled:  true,
-		Filename: scriptPath,
-		Timeout:  5 * time.Second,
-	})
+	// Create TorrentManager with proper script configuration
+	tm := createTestTorrentManager(t)
+	defer tm.Close()
+
+	// Configure torrent-done script via session config (proper way)
+	sessionConfig := tm.GetSessionConfig()
+	sessionConfig.ScriptTorrentDoneEnabled = true
+	sessionConfig.ScriptTorrentDoneFilename = scriptPath
+	err := tm.UpdateSessionConfig(sessionConfig)
+	if err != nil {
+		t.Fatalf("Failed to update session config: %v", err)
+	}
 
 	// Add a torrent
 	req := TorrentAddRequest{
@@ -181,8 +185,12 @@ func TestTorrentManager_ScriptHooks_TorrentCompleted(t *testing.T) {
 	// Remove the output file to ensure only completion script writes to it
 	os.Remove(outputFile)
 
-	// Simulate torrent completion by updating statistics
+	// Create mock metadata for completion detection to work
 	tm.mu.Lock()
+	// Create a minimal MetaInfo structure so completion detection works
+	mockInfo := &metainfo.MetaInfo{}
+	mockInfo.InfoBytes = []byte("d4:name9:test-file6:lengthi1024000ee") // Simple bencode
+	torrent.MetaInfo = mockInfo
 	torrent.Downloaded = 1024000 // Set to full size
 	torrent.PercentDone = 1.0    // Mark as complete
 	torrent.wasComplete = false  // Ensure transition from incomplete to complete
