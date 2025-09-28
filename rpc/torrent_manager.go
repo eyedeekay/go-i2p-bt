@@ -818,7 +818,33 @@ func (tm *TorrentManager) validateAndCreateDownloadDir(downloadDir string) error
 
 // applyRuntimeConfigChanges applies configuration changes to running components
 func (tm *TorrentManager) applyRuntimeConfigChanges(oldConfig, newConfig SessionConfiguration) error {
-	// Update queue manager configuration if queue settings changed
+	if err := tm.applyQueueConfigChanges(oldConfig, newConfig); err != nil {
+		return err
+	}
+
+	if err := tm.applyDownloadDirChanges(oldConfig, newConfig); err != nil {
+		return err
+	}
+
+	if err := tm.applyIncompleteDirChanges(oldConfig, newConfig); err != nil {
+		return err
+	}
+
+	tm.applyPeerLimitChanges(oldConfig, newConfig)
+	tm.applySpeedLimitChanges(oldConfig, newConfig)
+
+	if err := tm.applyBlocklistConfigChanges(oldConfig, newConfig); err != nil {
+		return err
+	}
+
+	tm.applyScriptConfigChanges(oldConfig, newConfig)
+
+	return nil
+}
+
+// applyQueueConfigChanges updates queue manager configuration if queue settings have changed.
+// It checks for changes in download and seed queue settings and applies the new configuration.
+func (tm *TorrentManager) applyQueueConfigChanges(oldConfig, newConfig SessionConfiguration) error {
 	if oldConfig.DownloadQueueEnabled != newConfig.DownloadQueueEnabled ||
 		oldConfig.DownloadQueueSize != newConfig.DownloadQueueSize ||
 		oldConfig.SeedQueueEnabled != newConfig.SeedQueueEnabled ||
@@ -828,51 +854,71 @@ func (tm *TorrentManager) applyRuntimeConfigChanges(oldConfig, newConfig Session
 			return fmt.Errorf("failed to update queue configuration: %w", err)
 		}
 	}
+	return nil
+}
 
-	// Update download directory for existing torrents if changed
+// applyDownloadDirChanges updates download directory for existing torrents if the directory has changed.
+// It validates that the new directory is not empty before applying the change.
+func (tm *TorrentManager) applyDownloadDirChanges(oldConfig, newConfig SessionConfiguration) error {
 	if oldConfig.DownloadDir != newConfig.DownloadDir && newConfig.DownloadDir != "" {
 		if err := tm.updateDownloadDirectory(newConfig.DownloadDir); err != nil {
 			return fmt.Errorf("failed to update download directory: %w", err)
 		}
 	}
+	return nil
+}
 
-	// Update incomplete directory settings if changed
+// applyIncompleteDirChanges updates incomplete directory settings if they have changed.
+// It handles both directory path changes and enabled/disabled state changes.
+func (tm *TorrentManager) applyIncompleteDirChanges(oldConfig, newConfig SessionConfiguration) error {
 	if oldConfig.IncompleteDir != newConfig.IncompleteDir ||
 		oldConfig.IncompleteDirEnabled != newConfig.IncompleteDirEnabled {
 		if err := tm.updateIncompleteDirConfiguration(oldConfig, newConfig); err != nil {
 			return fmt.Errorf("failed to update incomplete directory configuration: %w", err)
 		}
 	}
+	return nil
+}
 
-	// Update peer limits if changed
+// applyPeerLimitChanges updates peer limits if they have changed.
+// It checks both global and per-torrent peer limit settings.
+func (tm *TorrentManager) applyPeerLimitChanges(oldConfig, newConfig SessionConfiguration) {
 	if oldConfig.PeerLimitGlobal != newConfig.PeerLimitGlobal ||
 		oldConfig.PeerLimitPerTorrent != newConfig.PeerLimitPerTorrent {
 		tm.updatePeerLimits(newConfig)
 	}
+}
 
-	// Update speed limits if changed
+// applySpeedLimitChanges updates speed limits if they have changed.
+// It checks both download and upload speed limits and their enabled states.
+func (tm *TorrentManager) applySpeedLimitChanges(oldConfig, newConfig SessionConfiguration) {
 	if oldConfig.SpeedLimitDown != newConfig.SpeedLimitDown ||
 		oldConfig.SpeedLimitDownEnabled != newConfig.SpeedLimitDownEnabled ||
 		oldConfig.SpeedLimitUp != newConfig.SpeedLimitUp ||
 		oldConfig.SpeedLimitUpEnabled != newConfig.SpeedLimitUpEnabled {
 		tm.updateSpeedLimits(newConfig)
 	}
+}
 
-	// Update blocklist configuration if changed
+// applyBlocklistConfigChanges updates blocklist configuration if it has changed.
+// It handles both enabled state and blocklist URL changes.
+func (tm *TorrentManager) applyBlocklistConfigChanges(oldConfig, newConfig SessionConfiguration) error {
 	if oldConfig.BlocklistEnabled != newConfig.BlocklistEnabled ||
 		oldConfig.BlocklistURL != newConfig.BlocklistURL {
 		if err := tm.updateBlocklistConfiguration(newConfig); err != nil {
 			return fmt.Errorf("failed to update blocklist configuration: %w", err)
 		}
 	}
+	return nil
+}
 
-	// Update script configuration if changed
+// applyScriptConfigChanges updates script configuration if it has changed.
+// It handles changes in script enabled state and script filename.
+func (tm *TorrentManager) applyScriptConfigChanges(oldConfig, newConfig SessionConfiguration) {
 	if oldConfig.ScriptTorrentDoneEnabled != newConfig.ScriptTorrentDoneEnabled ||
 		oldConfig.ScriptTorrentDoneFilename != newConfig.ScriptTorrentDoneFilename {
 		tm.updateScriptConfiguration(newConfig)
 	}
-
-	return nil
 }
 
 // updateQueueConfiguration updates the queue manager with new settings

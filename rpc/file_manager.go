@@ -55,6 +55,32 @@ func (fm *FileManager) SetMinimumFreeSpace(bytes int64) {
 //   - Any file move operation fails
 //   - Rollback fails (critical error, may leave files in inconsistent state)
 func (fm *FileManager) MoveFiles(info metainfo.Info, sourceDir, destDir string, preserveStructure bool) error {
+	if err := fm.validateMoveDirectories(sourceDir, destDir, info.TotalLength()); err != nil {
+		return err
+	}
+
+	// Track moved files for rollback on failure
+	var movedFiles []struct {
+		source, dest string
+	}
+
+	if info.IsDir() {
+		if err := fm.processMultiFileTorrent(info, sourceDir, destDir, preserveStructure, &movedFiles); err != nil {
+			return err
+		}
+	} else {
+		if err := fm.processSingleFileTorrent(info, sourceDir, destDir, &movedFiles); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// validateMoveDirectories validates source directory and sets up destination directory with space checks.
+// It ensures the source directory is accessible, creates the destination directory if needed,
+// and verifies sufficient disk space is available for the move operation.
+func (fm *FileManager) validateMoveDirectories(sourceDir, destDir string, totalSize int64) error {
 	// Validate source directory exists and is readable
 	if _, err := os.Stat(sourceDir); err != nil {
 		return fmt.Errorf("source directory not accessible: %w", err)
@@ -66,66 +92,61 @@ func (fm *FileManager) MoveFiles(info metainfo.Info, sourceDir, destDir string, 
 	}
 
 	// Check available space at destination
-	totalSize := info.TotalLength()
 	if err := fm.CheckDiskSpace(destDir, totalSize); err != nil {
 		return fmt.Errorf("insufficient disk space: %w", err)
 	}
 
-	// Track moved files for rollback on failure
-	var movedFiles []struct {
-		source, dest string
-	}
+	return nil
+}
 
-	// Determine source path - could be single file or directory
-	var sourcePath string
-	if info.IsDir() {
-		sourcePath = filepath.Join(sourceDir, info.Name)
-	} else {
-		// Single file torrent - file name comes from info.Name
-		sourcePath = filepath.Join(sourceDir, info.Name)
-	}
+// processMultiFileTorrent handles moving all files in a multi-file torrent.
+// It iterates through all files in the torrent, determines their destination paths
+// based on the preserveStructure flag, and moves each file while tracking moved files for rollback.
+func (fm *FileManager) processMultiFileTorrent(info metainfo.Info, sourceDir, destDir string, preserveStructure bool, movedFiles *[]struct{ source, dest string }) error {
+	for _, file := range info.Files {
+		// file.Path(info) already includes the torrent name for multi-file torrents
+		srcFile := filepath.Join(sourceDir, file.Path(info))
 
-	if info.IsDir() {
-		// Multi-file torrent - move all files maintaining structure
-		for _, file := range info.Files {
-			// file.Path(info) already includes the torrent name for multi-file torrents
-			srcFile := filepath.Join(sourceDir, file.Path(info))
-
-			var destFile string
-			if preserveStructure {
-				destFile = filepath.Join(destDir, file.Path(info))
-			} else {
-				// Flatten structure - use just the filename
-				destFile = filepath.Join(destDir, filepath.Base(file.Path(info)))
-			}
-
-			// Create destination directory for this file
-			if err := os.MkdirAll(filepath.Dir(destFile), 0o755); err != nil {
-				// Rollback any files we've already moved
-				fm.rollbackMoves(movedFiles)
-				return fmt.Errorf("failed to create directory for %s: %w", destFile, err)
-			}
-
-			// Move the file
-			if err := fm.moveFile(srcFile, destFile); err != nil {
-				// Rollback any files we've already moved
-				fm.rollbackMoves(movedFiles)
-				return fmt.Errorf("failed to move file %s: %w", srcFile, err)
-			}
-
-			movedFiles = append(movedFiles, struct{ source, dest string }{srcFile, destFile})
-		}
-	} else {
-		// Single file torrent
-		destFile := filepath.Join(destDir, info.Name)
-
-		if err := fm.moveFile(sourcePath, destFile); err != nil {
-			return fmt.Errorf("failed to move single file %s: %w", sourcePath, err)
+		var destFile string
+		if preserveStructure {
+			destFile = filepath.Join(destDir, file.Path(info))
+		} else {
+			// Flatten structure - use just the filename
+			destFile = filepath.Join(destDir, filepath.Base(file.Path(info)))
 		}
 
-		movedFiles = append(movedFiles, struct{ source, dest string }{sourcePath, destFile})
+		// Create destination directory for this file
+		if err := os.MkdirAll(filepath.Dir(destFile), 0o755); err != nil {
+			// Rollback any files we've already moved
+			fm.rollbackMoves(*movedFiles)
+			return fmt.Errorf("failed to create directory for %s: %w", destFile, err)
+		}
+
+		// Move the file
+		if err := fm.moveFile(srcFile, destFile); err != nil {
+			// Rollback any files we've already moved
+			fm.rollbackMoves(*movedFiles)
+			return fmt.Errorf("failed to move file %s: %w", srcFile, err)
+		}
+
+		*movedFiles = append(*movedFiles, struct{ source, dest string }{srcFile, destFile})
+	}
+	return nil
+}
+
+// processSingleFileTorrent handles moving a single file torrent.
+// For single file torrents, it moves the file from the source directory to the destination
+// directory using the torrent name as specified in the metainfo.
+func (fm *FileManager) processSingleFileTorrent(info metainfo.Info, sourceDir, destDir string, movedFiles *[]struct{ source, dest string }) error {
+	// Single file torrent - file name comes from info.Name
+	sourcePath := filepath.Join(sourceDir, info.Name)
+	destFile := filepath.Join(destDir, info.Name)
+
+	if err := fm.moveFile(sourcePath, destFile); err != nil {
+		return fmt.Errorf("failed to move single file %s: %w", sourcePath, err)
 	}
 
+	*movedFiles = append(*movedFiles, struct{ source, dest string }{sourcePath, destFile})
 	return nil
 }
 
