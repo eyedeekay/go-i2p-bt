@@ -366,7 +366,7 @@ func (h *WebSocketHandler) handleUnknownMessage(msg WebSocketMessage) {
 
 // sendSubscriptionResponse sends a subscription-related response to the WebSocket client.
 // It creates and sends a response message with the specified type, data, and message ID.
-func (h *WebSocketHandler) sendSubscriptionResponse(client *WebSocketClient, responseType, subscription string, msgID string) {
+func (h *WebSocketHandler) sendSubscriptionResponse(client *WebSocketClient, responseType, subscription, msgID string) {
 	response := WebSocketMessage{
 		Type: responseType,
 		Data: subscription,

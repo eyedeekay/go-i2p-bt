@@ -128,20 +128,33 @@ func (bm *BlocklistManager) IsBlocked(ip string) bool {
 // Update fetches the latest blocklist from the configured URL.
 // Uses HTTP caching headers to avoid unnecessary downloads.
 func (bm *BlocklistManager) Update() error {
-	bm.mu.Lock()
-	url := bm.url
-	lastModified := bm.lastModified
-	etag := bm.etag
-	bm.mu.Unlock()
+	url, lastModified, etag := bm.getCacheInfo()
 
 	if url == "" {
 		return fmt.Errorf("no blocklist URL configured")
 	}
 
-	// Create HTTP request with caching headers
+	resp, err := bm.fetchBlocklistWithCache(url, lastModified, etag)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	return bm.processBlocklistResponse(resp)
+}
+
+// getCacheInfo retrieves the current URL and caching information thread-safely
+func (bm *BlocklistManager) getCacheInfo() (url, lastModified, etag string) {
+	bm.mu.Lock()
+	defer bm.mu.Unlock()
+	return bm.url, bm.lastModified, bm.etag
+}
+
+// fetchBlocklistWithCache creates and executes an HTTP request with appropriate caching headers
+func (bm *BlocklistManager) fetchBlocklistWithCache(url, lastModified, etag string) (*http.Response, error) {
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
+		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
 	if lastModified != "" {
@@ -153,15 +166,17 @@ func (bm *BlocklistManager) Update() error {
 
 	resp, err := bm.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("failed to fetch blocklist: %w", err)
+		return nil, fmt.Errorf("failed to fetch blocklist: %w", err)
 	}
-	defer resp.Body.Close()
 
+	return resp, nil
+}
+
+// processBlocklistResponse handles the HTTP response and updates the blocklist if necessary
+func (bm *BlocklistManager) processBlocklistResponse(resp *http.Response) error {
 	// Handle not modified
 	if resp.StatusCode == http.StatusNotModified {
-		bm.mu.Lock()
-		bm.lastUpdated = time.Now()
-		bm.mu.Unlock()
+		bm.updateLastModifiedTime()
 		return nil
 	}
 
@@ -175,16 +190,27 @@ func (bm *BlocklistManager) Update() error {
 		return fmt.Errorf("failed to parse blocklist: %w", err)
 	}
 
-	// Update the blocklist atomically
+	bm.updateBlocklistData(ranges, resp.Header)
+	return nil
+}
+
+// updateLastModifiedTime updates only the last updated timestamp when content is not modified
+func (bm *BlocklistManager) updateLastModifiedTime() {
 	bm.mu.Lock()
+	defer bm.mu.Unlock()
+	bm.lastUpdated = time.Now()
+}
+
+// updateBlocklistData atomically updates the blocklist with new data and metadata
+func (bm *BlocklistManager) updateBlocklistData(ranges []ipRange, headers http.Header) {
+	bm.mu.Lock()
+	defer bm.mu.Unlock()
+
 	bm.ipRanges = ranges
-	bm.lastModified = resp.Header.Get("Last-Modified")
-	bm.etag = resp.Header.Get("ETag")
+	bm.lastModified = headers.Get("Last-Modified")
+	bm.etag = headers.Get("ETag")
 	bm.lastUpdated = time.Now()
 	atomic.StoreInt64(&bm.size, int64(len(ranges)))
-	bm.mu.Unlock()
-
-	return nil
 }
 
 // parseBlocklist parses a blocklist from various formats.
