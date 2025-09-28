@@ -417,6 +417,34 @@ func (h *WebSocketHandler) writeToClient(client *WebSocketClient) {
 	}
 }
 
+// checkClientSubscription determines if a client is subscribed to the given message type.
+// System messages are always delivered regardless of subscription status.
+func (h *WebSocketHandler) checkClientSubscription(client *WebSocketClient, messageType string) bool {
+	client.subscriptionsMu.RLock()
+	isSubscribed := client.subscriptions[messageType] || messageType == "system"
+	client.subscriptionsMu.RUnlock()
+	return isSubscribed
+}
+
+// sendMessageToClient attempts to send a message to the specified client.
+// Returns true if the message was sent successfully, false if the client should be cleaned up.
+func (h *WebSocketHandler) sendMessageToClient(client *WebSocketClient, message WebSocketMessage) bool {
+	select {
+	case client.send <- message:
+		return true
+	default:
+		// Client send buffer is full, client needs cleanup
+		return false
+	}
+}
+
+// cleanupFailedClient safely removes a client that failed to receive messages.
+// This function closes the client's send channel and removes it from the clients map.
+func (h *WebSocketHandler) cleanupFailedClient(client *WebSocketClient) {
+	close(client.send)
+	delete(h.clients, client.conn)
+}
+
 // handleBroadcast processes broadcast messages and sends them to subscribed clients
 func (h *WebSocketHandler) handleBroadcast() {
 	for {
@@ -424,17 +452,9 @@ func (h *WebSocketHandler) handleBroadcast() {
 		case message := <-h.broadcast:
 			h.clientsMu.RLock()
 			for _, client := range h.clients {
-				// Check if client is subscribed to this message type
-				client.subscriptionsMu.RLock()
-				isSubscribed := client.subscriptions[message.Type] || message.Type == "system"
-				client.subscriptionsMu.RUnlock()
-				if isSubscribed {
-					select {
-					case client.send <- message:
-					default:
-						// Client send buffer is full, remove the client
-						close(client.send)
-						delete(h.clients, client.conn)
+				if h.checkClientSubscription(client, message.Type) {
+					if !h.sendMessageToClient(client, message) {
+						h.cleanupFailedClient(client)
 					}
 				}
 			}
