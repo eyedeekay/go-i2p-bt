@@ -1438,38 +1438,58 @@ func (tm *TorrentManager) updateTrackingFields(torrent *TorrentState, now time.T
 
 // updateCompletionStatistics calculates completion percentage, remaining bytes, and piece statistics
 func (tm *TorrentManager) updateCompletionStatistics(torrent *TorrentState) {
-	if torrent.MetaInfo != nil {
-		info, err := torrent.MetaInfo.Info()
-		if err == nil {
-			totalSize := info.TotalLength()
-			if totalSize > 0 {
-				torrent.PercentDone = float64(torrent.Downloaded) / float64(totalSize)
-				if torrent.PercentDone > 1.0 {
-					torrent.PercentDone = 1.0
-				}
-				torrent.Left = totalSize - torrent.Downloaded
-				if torrent.Left < 0 {
-					torrent.Left = 0
-				}
-			}
-
-			// Calculate piece statistics
-			torrent.PieceCount = int64(info.CountPieces())
-			torrent.PiecesComplete = tm.calculateCompletedPieces(torrent)
-			torrent.PiecesAvailable = tm.calculateAvailablePieces(torrent)
-		}
+	if torrent.MetaInfo == nil {
+		return
+	}
+	
+	info, err := torrent.MetaInfo.Info()
+	if err != nil {
+		return
 	}
 
-	// Check for completion state change and execute script hook
+	tm.calculateBasicCompletionStats(torrent, info)
+	tm.calculatePieceStatistics(torrent, info)
+	tm.handleCompletionStateChange(torrent)
+}
+
+// calculateBasicCompletionStats calculates completion percentage and remaining bytes for a torrent.
+func (tm *TorrentManager) calculateBasicCompletionStats(torrent *TorrentState, info metainfo.Info) {
+	totalSize := info.TotalLength()
+	if totalSize <= 0 {
+		return
+	}
+
+	torrent.PercentDone = float64(torrent.Downloaded) / float64(totalSize)
+	if torrent.PercentDone > 1.0 {
+		torrent.PercentDone = 1.0
+	}
+	
+	torrent.Left = totalSize - torrent.Downloaded
+	if torrent.Left < 0 {
+		torrent.Left = 0
+	}
+}
+
+// calculatePieceStatistics calculates piece count and completion statistics for a torrent.
+func (tm *TorrentManager) calculatePieceStatistics(torrent *TorrentState, info metainfo.Info) {
+	torrent.PieceCount = int64(info.CountPieces())
+	torrent.PiecesComplete = tm.calculateCompletedPieces(torrent)
+	torrent.PiecesAvailable = tm.calculateAvailablePieces(torrent)
+}
+
+// handleCompletionStateChange detects completion state changes and executes appropriate script hooks.
+func (tm *TorrentManager) handleCompletionStateChange(torrent *TorrentState) {
 	isComplete := torrent.PercentDone >= 1.0
 	if !torrent.wasComplete && isComplete {
-		// Torrent just completed - execute torrent-done script hook
 		torrent.wasComplete = true
-		go func() {
-			if err := tm.scriptManager.ExecuteHook(ScriptHookTorrentDone, torrent); err != nil {
-				tm.log("Failed to execute torrent-done script for torrent %d: %v", torrent.ID, err)
-			}
-		}()
+		go tm.executeTorrentDoneHook(torrent)
+	}
+}
+
+// executeTorrentDoneHook executes the torrent-done script hook with error handling.
+func (tm *TorrentManager) executeTorrentDoneHook(torrent *TorrentState) {
+	if err := tm.scriptManager.ExecuteHook(ScriptHookTorrentDone, torrent); err != nil {
+		tm.log("Failed to execute torrent-done script for torrent %d: %v", torrent.ID, err)
 	}
 }
 
