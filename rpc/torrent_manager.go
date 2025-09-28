@@ -1482,7 +1482,7 @@ func (tm *TorrentManager) handleCompletionStateChange(torrent *TorrentState) {
 	isComplete := torrent.PercentDone >= 1.0
 	if !torrent.wasComplete && isComplete {
 		torrent.wasComplete = true
-		// Create a snapshot of torrent state for script hook to avoid race conditions  
+		// Create a snapshot of torrent state for script hook to avoid race conditions
 		torrentSnapshot := *torrent
 		go tm.executeTorrentDoneHook(&torrentSnapshot)
 	}
