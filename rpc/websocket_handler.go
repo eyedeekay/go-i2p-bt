@@ -388,34 +388,64 @@ func (h *WebSocketHandler) sendResponseToClient(client *WebSocketClient, respons
 
 // writeToClient handles sending messages to a WebSocket client
 func (h *WebSocketHandler) writeToClient(client *WebSocketClient) {
-	ticker := time.NewTicker(h.config.PingPeriod)
-	defer func() {
-		ticker.Stop()
-		client.conn.Close()
-	}()
+	ticker := h.setupClientTicker()
+	defer h.cleanupClientConnection(ticker, client)
 
+	h.processClientMessages(client, ticker)
+}
+
+// setupClientTicker creates and configures a ticker for periodic ping messages
+func (h *WebSocketHandler) setupClientTicker() *time.Ticker {
+	return time.NewTicker(h.config.PingPeriod)
+}
+
+// cleanupClientConnection properly closes the ticker and client connection
+func (h *WebSocketHandler) cleanupClientConnection(ticker *time.Ticker, client *WebSocketClient) {
+	ticker.Stop()
+	client.conn.Close()
+}
+
+// processClientMessages handles the main message processing loop for a WebSocket client
+func (h *WebSocketHandler) processClientMessages(client *WebSocketClient, ticker *time.Ticker) {
 	for {
 		select {
 		case message, ok := <-client.send:
-			client.conn.SetWriteDeadline(time.Now().Add(h.config.WriteTimeout))
-			if !ok {
-				// Channel was closed
-				client.conn.WriteMessage(websocket.CloseMessage, []byte{})
+			if !h.processOutgoingMessage(client, message, ok) {
 				return
 			}
-
-			if err := client.conn.WriteJSON(message); err != nil {
-				log.Printf("WebSocket write error: %v", err)
-				return
-			}
-
 		case <-ticker.C:
-			client.conn.SetWriteDeadline(time.Now().Add(h.config.WriteTimeout))
-			if err := client.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+			if !h.sendPingMessage(client) {
 				return
 			}
 		}
 	}
+}
+
+// processOutgoingMessage processes an outgoing message from the client's send channel
+func (h *WebSocketHandler) processOutgoingMessage(client *WebSocketClient, message WebSocketMessage, ok bool) bool {
+	client.conn.SetWriteDeadline(time.Now().Add(h.config.WriteTimeout))
+
+	if !ok {
+		// Channel was closed
+		client.conn.WriteMessage(websocket.CloseMessage, []byte{})
+		return false
+	}
+
+	if err := client.conn.WriteJSON(message); err != nil {
+		log.Printf("WebSocket write error: %v", err)
+		return false
+	}
+
+	return true
+}
+
+// sendPingMessage sends a ping message to keep the connection alive
+func (h *WebSocketHandler) sendPingMessage(client *WebSocketClient) bool {
+	client.conn.SetWriteDeadline(time.Now().Add(h.config.WriteTimeout))
+	if err := client.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+		return false
+	}
+	return true
 }
 
 // checkClientSubscription determines if a client is subscribed to the given message type.
