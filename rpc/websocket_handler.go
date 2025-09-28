@@ -461,7 +461,7 @@ func (h *WebSocketHandler) handleBroadcast() {
 func (h *WebSocketHandler) processBroadcastMessage(message WebSocketMessage) {
 	h.clientsMu.RLock()
 	defer h.clientsMu.RUnlock()
-	
+
 	for _, client := range h.clients {
 		h.handleClientMessage(client, message)
 	}
