@@ -666,3 +666,319 @@ func BenchmarkMimeTypeDetection(b *testing.B) {
 		}
 	}
 }
+
+// File upload tests
+
+func TestFileUploadHandler(t *testing.T) {
+	tempDir := t.TempDir()
+	server := createTestServer(t)
+
+	config := WebHandlerConfig{
+		StaticDir:   tempDir,
+		URLPrefix:   "/web/",
+		RequireAuth: false,
+	}
+
+	handler, err := NewWebHandler(config, server)
+	if err != nil {
+		t.Fatalf("Failed to create web handler: %v", err)
+	}
+
+	tests := []struct {
+		name           string
+		method         string
+		path           string
+		setupRequest   func() *http.Request
+		expectedStatus int
+		checkResponse  func(*testing.T, *httptest.ResponseRecorder)
+	}{
+		{
+			name:   "valid torrent file upload",
+			method: "POST",
+			path:   "/upload",
+			setupRequest: func() *http.Request {
+				return createMultipartRequest(t, "test.torrent", createValidTorrentData(), false)
+			},
+			expectedStatus: http.StatusOK,
+			checkResponse: func(t *testing.T, w *httptest.ResponseRecorder) {
+				if !strings.Contains(w.Body.String(), `"success":true`) {
+					t.Errorf("Expected success response, got: %s", w.Body.String())
+				}
+				if !strings.Contains(w.Body.String(), "uploaded successfully") {
+					t.Errorf("Expected success message, got: %s", w.Body.String())
+				}
+			},
+		},
+		{
+			name:   "invalid file extension",
+			method: "POST",
+			path:   "/upload",
+			setupRequest: func() *http.Request {
+				return createMultipartRequest(t, "test.txt", []byte("not a torrent"), false)
+			},
+			expectedStatus: http.StatusBadRequest,
+			checkResponse: func(t *testing.T, w *httptest.ResponseRecorder) {
+				if !strings.Contains(w.Body.String(), `"success":false`) {
+					t.Errorf("Expected error response, got: %s", w.Body.String())
+				}
+				if !strings.Contains(w.Body.String(), "torrent extension") {
+					t.Errorf("Expected extension error, got: %s", w.Body.String())
+				}
+			},
+		},
+		{
+			name:   "no file provided",
+			method: "POST",
+			path:   "/upload",
+			setupRequest: func() *http.Request {
+				return createEmptyMultipartRequest(t)
+			},
+			expectedStatus: http.StatusBadRequest,
+			checkResponse: func(t *testing.T, w *httptest.ResponseRecorder) {
+				if !strings.Contains(w.Body.String(), "No torrent file") {
+					t.Errorf("Expected no file error, got: %s", w.Body.String())
+				}
+			},
+		},
+		{
+			name:   "invalid torrent file format",
+			method: "POST",
+			path:   "/upload",
+			setupRequest: func() *http.Request {
+				return createMultipartRequest(t, "bad.torrent", []byte("invalid torrent data"), false)
+			},
+			expectedStatus: http.StatusBadRequest,
+			checkResponse: func(t *testing.T, w *httptest.ResponseRecorder) {
+				if !strings.Contains(w.Body.String(), "Invalid torrent file") {
+					t.Errorf("Expected format error, got: %s", w.Body.String())
+				}
+			},
+		},
+		{
+			name:   "paused torrent upload",
+			method: "POST",
+			path:   "/upload",
+			setupRequest: func() *http.Request {
+				return createMultipartRequest(t, "paused.torrent", createValidTorrentData(), true)
+			},
+			expectedStatus: http.StatusOK,
+			checkResponse: func(t *testing.T, w *httptest.ResponseRecorder) {
+				if !strings.Contains(w.Body.String(), `"success":true`) {
+					t.Errorf("Expected success response, got: %s", w.Body.String())
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := tt.setupRequest()
+			w := httptest.NewRecorder()
+
+			handler.ServeHTTP(w, req)
+
+			if w.Code != tt.expectedStatus {
+				t.Errorf("Expected status %d, got %d", tt.expectedStatus, w.Code)
+			}
+
+			if tt.checkResponse != nil {
+				tt.checkResponse(t, w)
+			}
+		})
+	}
+}
+
+func TestFileUploadWithAuthentication(t *testing.T) {
+	tempDir := t.TempDir()
+	server := createTestServerWithAuth(t, "admin", "secret") // Use server with auth
+
+	config := WebHandlerConfig{
+		StaticDir:   tempDir,
+		URLPrefix:   "/web/",
+		RequireAuth: true, // Enable authentication
+	}
+
+	handler, err := NewWebHandler(config, server)
+	if err != nil {
+		t.Fatalf("Failed to create web handler: %v", err)
+	}
+
+	// Test without authentication
+	req := createMultipartRequest(t, "test.torrent", createValidTorrentData(), false)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("Expected 401 Unauthorized, got %d", w.Code)
+	}
+
+	// Test with valid authentication
+	req = createMultipartRequest(t, "test.torrent", createValidTorrentData(), false)
+	req.SetBasicAuth("admin", "secret") // Valid credentials
+	w = httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected 200 OK with auth, got %d", w.Code)
+	}
+}
+
+func TestTorrentFileValidation(t *testing.T) {
+	tempDir := t.TempDir()
+	server := createTestServer(t)
+
+	config := WebHandlerConfig{
+		StaticDir:   tempDir,
+		URLPrefix:   "/web/",
+		RequireAuth: false,
+	}
+
+	handler, err := NewWebHandler(config, server)
+	if err != nil {
+		t.Fatalf("Failed to create web handler: %v", err)
+	}
+
+	tests := []struct {
+		name     string
+		data     []byte
+		expected bool
+	}{
+		{
+			name:     "valid torrent with announce",
+			data:     createValidTorrentData(),
+			expected: true,
+		},
+		{
+			name:     "valid torrent with info only",
+			data:     []byte("d4:infod4:name4:testee"),
+			expected: true,
+		},
+		{
+			name:     "invalid format - not bencode",
+			data:     []byte("not bencode"),
+			expected: false,
+		},
+		{
+			name:     "invalid format - empty file",
+			data:     []byte(""),
+			expected: false,
+		},
+		{
+			name:     "invalid format - too short",
+			data:     []byte("d"),
+			expected: false,
+		},
+		{
+			name:     "invalid format - no torrent keys",
+			data:     []byte("d4:test4:datae"),
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := handler.isValidTorrentFile(tt.data)
+			if result != tt.expected {
+				t.Errorf("Expected %v for %s, got %v", tt.expected, tt.name, result)
+			}
+		})
+	}
+}
+
+func TestFileUploadSizeLimit(t *testing.T) {
+	tempDir := t.TempDir()
+	server := createTestServer(t)
+
+	config := WebHandlerConfig{
+		StaticDir:   tempDir,
+		URLPrefix:   "/web/",
+		RequireAuth: false,
+	}
+
+	handler, err := NewWebHandler(config, server)
+	if err != nil {
+		t.Fatalf("Failed to create web handler: %v", err)
+	}
+
+	// Create a large file (simulated)
+	largeData := make([]byte, 11*1024*1024) // 11MB - over the 10MB limit
+	for i := range largeData {
+		largeData[i] = byte(i % 256)
+	}
+
+	req := createMultipartRequest(t, "large.torrent", largeData, false)
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	// Should fail due to size limit in ParseMultipartForm
+	if w.Code == http.StatusOK {
+		t.Error("Expected large file upload to fail")
+	}
+}
+
+// Helper functions for file upload tests
+
+func createMultipartRequest(t *testing.T, filename string, data []byte, paused bool) *http.Request {
+	body := &strings.Builder{}
+
+	// Create multipart form manually for testing
+	boundary := "----formdata-test-boundary"
+
+	body.WriteString("--" + boundary + "\r\n")
+	body.WriteString("Content-Disposition: form-data; name=\"torrent\"; filename=\"" + filename + "\"\r\n")
+	body.WriteString("Content-Type: application/x-bittorrent\r\n\r\n")
+	body.Write(data)
+	body.WriteString("\r\n")
+
+	if paused {
+		body.WriteString("--" + boundary + "\r\n")
+		body.WriteString("Content-Disposition: form-data; name=\"paused\"\r\n\r\n")
+		body.WriteString("true\r\n")
+	}
+
+	body.WriteString("--" + boundary + "--\r\n")
+
+	req := httptest.NewRequest("POST", "/upload", strings.NewReader(body.String()))
+	req.Header.Set("Content-Type", "multipart/form-data; boundary="+boundary)
+
+	return req
+}
+
+func createEmptyMultipartRequest(t *testing.T) *http.Request {
+	boundary := "----formdata-test-boundary"
+	body := "--" + boundary + "--\r\n"
+
+	req := httptest.NewRequest("POST", "/upload", strings.NewReader(body))
+	req.Header.Set("Content-Type", "multipart/form-data; boundary="+boundary)
+
+	return req
+}
+
+func createValidTorrentData() []byte {
+	// Create a minimal valid torrent file in bencode format
+	// This represents: d8:announce9:test.test4:infod4:name4:testee
+	return []byte("d8:announce9:test.test4:infod4:name4:testee")
+}
+
+func BenchmarkFileUploadValidation(b *testing.B) {
+	data := createValidTorrentData()
+	tempDir := b.TempDir()
+	server := createTestServer(&testing.T{})
+
+	config := WebHandlerConfig{
+		StaticDir:   tempDir,
+		URLPrefix:   "/web/",
+		RequireAuth: false,
+	}
+
+	handler, err := NewWebHandler(config, server)
+	if err != nil {
+		b.Fatalf("Failed to create web handler: %v", err)
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		handler.isValidTorrentFile(data)
+	}
+}

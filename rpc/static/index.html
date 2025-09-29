@@ -33,15 +33,46 @@
             </section>
 
             <section class="actions-panel">
-                <h2>RPC Information</h2>
-                <div class="action-buttons">
-                    <button id="refresh-stats" class="btn btn-primary">Refresh Statistics</button>
-                    <button id="test-connection" class="btn btn-secondary">Test RPC Connection</button>
+                <h2>Torrent Management</h2>
+                <div class="upload-section">
+                    <h3>Upload .torrent File</h3>
+                    <form id="torrent-upload-form" enctype="multipart/form-data">
+                        <div class="file-input-wrapper">
+                            <input type="file" id="torrent-file" name="torrent" accept=".torrent" required>
+                            <label for="torrent-file" class="file-input-label">
+                                <span id="file-label-text">Choose .torrent file</span>
+                            </label>
+                        </div>
+                        <div class="upload-options">
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="paused-upload" name="paused">
+                                <span class="checkmark"></span>
+                                Start paused
+                            </label>
+                        </div>
+                        <div class="upload-actions">
+                            <button type="submit" class="btn btn-primary" id="upload-btn">
+                                <span id="upload-btn-text">Upload Torrent</span>
+                            </button>
+                            <div id="upload-progress" class="progress-bar" style="display: none;">
+                                <div class="progress-fill"></div>
+                                <span class="progress-text">Uploading...</span>
+                            </div>
+                        </div>
+                    </form>
                 </div>
-                <div class="rpc-info">
-                    <p><strong>RPC Endpoint:</strong> <code>/transmission/rpc</code></p>
-                    <p><strong>Protocol:</strong> Transmission RPC v17 Compatible</p>
-                    <p><strong>Authentication:</strong> <span id="auth-status">Checking...</span></p>
+
+                <div class="rpc-section">
+                    <h3>RPC Information</h3>
+                    <div class="action-buttons">
+                        <button id="refresh-stats" class="btn btn-primary">Refresh Statistics</button>
+                        <button id="test-connection" class="btn btn-secondary">Test RPC Connection</button>
+                    </div>
+                    <div class="rpc-info">
+                        <p><strong>RPC Endpoint:</strong> <code>/transmission/rpc</code></p>
+                        <p><strong>Protocol:</strong> Transmission RPC v17 Compatible</p>
+                        <p><strong>Authentication:</strong> <span id="auth-status">Checking...</span></p>
+                    </div>
                 </div>
             </section>
 
