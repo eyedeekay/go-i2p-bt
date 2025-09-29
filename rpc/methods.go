@@ -722,9 +722,7 @@ func (m *RPCMethods) addTrackersWithDuplicateCheck(torrent *TorrentState, tracke
 		}
 	}
 	return nil
-}
-
-// removeTrackersWithBoundsCheck removes trackers by index with comprehensive bounds checking.
+} // removeTrackersWithBoundsCheck removes trackers by index with comprehensive bounds checking.
 // This function validates all indices before removal and sorts them in descending order
 // to ensure safe removal from highest to lowest index.
 func (m *RPCMethods) removeTrackersWithBoundsCheck(torrent *TorrentState, indicesToRemove []int64) error {

@@ -283,10 +283,16 @@ func TestTorrentSetFileSelection(t *testing.T) {
 				if err != nil {
 					t.Errorf("Expected no error, got: %v", err)
 				} else {
+					// FIXED: Get the current torrent state from the manager instead of using the stale copy
+					currentTorrent, getErr := tm.GetTorrent(torrent.ID)
+					if getErr != nil {
+						t.Fatalf("Failed to get current torrent state: %v", getErr)
+					}
+
 					// Check the wanted array
 					for i, expected := range tt.expectedWanted {
-						if i < len(torrent.Wanted) && torrent.Wanted[i] != expected {
-							t.Errorf("File %d: expected wanted=%v, got %v", i, expected, torrent.Wanted[i])
+						if i < len(currentTorrent.Wanted) && currentTorrent.Wanted[i] != expected {
+							t.Errorf("File %d: expected wanted=%v, got %v", i, expected, currentTorrent.Wanted[i])
 						}
 					}
 				}
@@ -362,10 +368,16 @@ func TestTorrentSetFilePriorities(t *testing.T) {
 				if err != nil {
 					t.Errorf("Expected no error, got: %v", err)
 				} else {
+					// FIXED: Get the current torrent state from the manager instead of using the stale copy
+					currentTorrent, getErr := tm.GetTorrent(torrent.ID)
+					if getErr != nil {
+						t.Fatalf("Failed to get current torrent state: %v", getErr)
+					}
+
 					// Check the priorities array
 					for i, expected := range tt.expectedPriorities {
-						if i < len(torrent.Priorities) && torrent.Priorities[i] != expected {
-							t.Errorf("File %d: expected priority=%d, got %d", i, expected, torrent.Priorities[i])
+						if i < len(currentTorrent.Priorities) && currentTorrent.Priorities[i] != expected {
+							t.Errorf("File %d: expected priority=%d, got %d", i, expected, currentTorrent.Priorities[i])
 						}
 					}
 				}
@@ -386,8 +398,15 @@ func TestTorrentSetTrackerManagement(t *testing.T) {
 	// Create a test torrent (arrays are initialized in the helper)
 	torrent := createTestTorrentForSet(t, tm)
 
-	// Add an additional tracker for testing
-	torrent.TrackerList = append(torrent.TrackerList, "http://tracker2.example.com/announce")
+	// FIXED: Use RPC method to add the additional tracker for testing, not manual modification
+	// Add an additional tracker via RPC (this modifies the stored torrent, not the returned copy)
+	err = methods.TorrentSet(TorrentActionRequest{
+		IDs:        []interface{}{torrent.ID},
+		TrackerAdd: []string{"http://tracker2.example.com/announce"},
+	})
+	if err != nil {
+		t.Fatalf("Failed to add initial tracker for test setup: %v", err)
+	}
 
 	tests := []struct {
 		name             string
@@ -493,29 +512,29 @@ func TestTorrentSetTrackerManagement(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Store initial state
-			initialTrackers := make([]string, len(torrent.TrackerList))
-			copy(initialTrackers, torrent.TrackerList)
-
 			err := methods.TorrentSet(tt.req)
 
 			if tt.expectError {
 				if err == nil {
 					t.Errorf("Expected error, got nil")
 				}
-				// Restore state for next test
-				torrent.TrackerList = initialTrackers
 			} else {
 				if err != nil {
 					t.Errorf("Expected no error, got: %v", err)
 				} else {
+					// FIXED: Get the current torrent state from the manager instead of using the stale copy
+					currentTorrent, getErr := tm.GetTorrent(torrent.ID)
+					if getErr != nil {
+						t.Fatalf("Failed to get current torrent state: %v", getErr)
+					}
+
 					// Check the tracker list
-					if len(torrent.TrackerList) != len(tt.expectedTrackers) {
-						t.Errorf("Expected %d trackers, got %d", len(tt.expectedTrackers), len(torrent.TrackerList))
+					if len(currentTorrent.TrackerList) != len(tt.expectedTrackers) {
+						t.Errorf("Expected %d trackers, got %d", len(tt.expectedTrackers), len(currentTorrent.TrackerList))
 					} else {
 						for i, expected := range tt.expectedTrackers {
-							if torrent.TrackerList[i] != expected {
-								t.Errorf("Tracker %d: expected %s, got %s", i, expected, torrent.TrackerList[i])
+							if currentTorrent.TrackerList[i] != expected {
+								t.Errorf("Tracker %d: expected %s, got %s", i, expected, currentTorrent.TrackerList[i])
 							}
 						}
 					}
@@ -551,26 +570,32 @@ func TestTorrentSetSeedingConfiguration(t *testing.T) {
 		t.Fatalf("Failed to set seeding configuration: %v", err)
 	}
 
+	// FIXED: Get the current torrent state from the manager instead of using the stale copy
+	currentTorrent, getErr := tm.GetTorrent(torrent.ID)
+	if getErr != nil {
+		t.Fatalf("Failed to get current torrent state: %v", getErr)
+	}
+
 	// Verify changes were applied
-	if torrent.SeedRatioLimit != 2.5 {
-		t.Errorf("Expected seed ratio limit 2.5, got %f", torrent.SeedRatioLimit)
+	if currentTorrent.SeedRatioLimit != 2.5 {
+		t.Errorf("Expected seed ratio limit 2.5, got %f", currentTorrent.SeedRatioLimit)
 	}
 
-	if torrent.SeedIdleLimit != 1800 {
-		t.Errorf("Expected seed idle limit 1800, got %d", torrent.SeedIdleLimit)
+	if currentTorrent.SeedIdleLimit != 1800 {
+		t.Errorf("Expected seed idle limit 1800, got %d", currentTorrent.SeedIdleLimit)
 	}
 
-	if !torrent.HonorsSessionLimits {
+	if !currentTorrent.HonorsSessionLimits {
 		t.Errorf("Expected honors session limits to be true")
 	}
 
 	expectedLabels := []string{"test", "important"}
-	if len(torrent.Labels) != len(expectedLabels) {
-		t.Errorf("Expected %d labels, got %d", len(expectedLabels), len(torrent.Labels))
+	if len(currentTorrent.Labels) != len(expectedLabels) {
+		t.Errorf("Expected %d labels, got %d", len(expectedLabels), len(currentTorrent.Labels))
 	} else {
 		for i, expected := range expectedLabels {
-			if torrent.Labels[i] != expected {
-				t.Errorf("Label %d: expected %s, got %s", i, expected, torrent.Labels[i])
+			if currentTorrent.Labels[i] != expected {
+				t.Errorf("Label %d: expected %s, got %s", i, expected, currentTorrent.Labels[i])
 			}
 		}
 	}
@@ -622,8 +647,12 @@ func TestTorrentSetLocationUpdate(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Store original location
-			originalLocation := torrent.DownloadDir
+			// FIXED: Get original location from the current state, not the stale copy
+			currentTorrent, getErr := tm.GetTorrent(torrent.ID)
+			if getErr != nil {
+				t.Fatalf("Failed to get current torrent state: %v", getErr)
+			}
+			originalLocation := currentTorrent.DownloadDir
 
 			req := TorrentActionRequest{
 				IDs:      []interface{}{torrent.ID},
@@ -637,23 +666,33 @@ func TestTorrentSetLocationUpdate(t *testing.T) {
 				if err == nil {
 					t.Errorf("Expected error, got nil")
 				}
-				// Verify location wasn't changed on error
-				if torrent.DownloadDir != originalLocation {
-					t.Errorf("Location was changed unexpectedly to %s", torrent.DownloadDir)
+				// FIXED: Verify location wasn't changed on error using current state
+				currentTorrent, getErr := tm.GetTorrent(torrent.ID)
+				if getErr != nil {
+					t.Fatalf("Failed to get current torrent state: %v", getErr)
+				}
+				if currentTorrent.DownloadDir != originalLocation {
+					t.Errorf("Location was changed unexpectedly to %s", currentTorrent.DownloadDir)
 				}
 			} else {
 				if err != nil {
 					t.Errorf("Expected no error, got: %v", err)
 				} else {
+					// FIXED: Get current state to verify changes
+					currentTorrent, getErr := tm.GetTorrent(torrent.ID)
+					if getErr != nil {
+						t.Fatalf("Failed to get current torrent state: %v", getErr)
+					}
+
 					// For empty location, verify it wasn't changed
 					if tt.location == "" {
-						if torrent.DownloadDir != originalLocation {
-							t.Errorf("Empty location should not change download dir, but it changed from %s to %s", originalLocation, torrent.DownloadDir)
+						if currentTorrent.DownloadDir != originalLocation {
+							t.Errorf("Empty location should not change download dir, but it changed from %s to %s", originalLocation, currentTorrent.DownloadDir)
 						}
 					} else {
 						// For non-empty location, verify it was updated
-						if torrent.DownloadDir != tt.location {
-							t.Errorf("Expected download dir %s, got %s", tt.location, torrent.DownloadDir)
+						if currentTorrent.DownloadDir != tt.location {
+							t.Errorf("Expected download dir %s, got %s", tt.location, currentTorrent.DownloadDir)
 						}
 					}
 				}
