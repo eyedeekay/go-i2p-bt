@@ -76,6 +76,53 @@
                 </div>
             </section>
 
+            <section class="torrent-list-section">
+                <h2>Active Torrents</h2>
+                <div class="torrent-controls">
+                    <div class="control-buttons">
+                        <button id="refresh-torrents" class="btn btn-primary">Refresh List</button>
+                        <button id="start-all" class="btn btn-success">Start All</button>
+                        <button id="stop-all" class="btn btn-warning">Stop All</button>
+                    </div>
+                    <div class="torrent-filters">
+                        <select id="status-filter" class="filter-select">
+                            <option value="">All Status</option>
+                            <option value="downloading">Downloading</option>
+                            <option value="seeding">Seeding</option>
+                            <option value="paused">Paused</option>
+                            <option value="error">Error</option>
+                        </select>
+                        <input type="text" id="name-filter" placeholder="Search torrents..." class="filter-input">
+                    </div>
+                </div>
+                <div class="torrent-list-container">
+                    <div id="torrent-list-loading" class="loading-message" style="display: none;">
+                        <div class="loading-spinner"></div>
+                        <p>Loading torrents...</p>
+                    </div>
+                    <div id="torrent-list-empty" class="empty-message" style="display: none;">
+                        <p>No torrents found. Upload a .torrent file to get started!</p>
+                    </div>
+                    <table id="torrent-list" class="torrent-table" style="display: none;">
+                        <thead>
+                            <tr>
+                                <th class="sortable" data-sort="name">Name</th>
+                                <th class="sortable" data-sort="status">Status</th>
+                                <th class="sortable" data-sort="progress">Progress</th>
+                                <th class="sortable" data-sort="size">Size</th>
+                                <th class="sortable" data-sort="downloadRate">Down Speed</th>
+                                <th class="sortable" data-sort="uploadRate">Up Speed</th>
+                                <th class="sortable" data-sort="eta">ETA</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="torrent-list-body">
+                            <!-- Torrent rows will be populated here -->
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
             <section class="api-docs">
                 <h2>Quick API Reference</h2>
                 <div class="api-examples">
