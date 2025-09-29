@@ -1316,11 +1316,15 @@ func (tm *TorrentManager) announceToTrackers(torrent *TorrentState) {
 	}
 }
 
-// updateTorrentPeers updates the peer list for a torrent
+// updateTorrentPeers updates the peer list for a torrent (public interface with locking)
 func (tm *TorrentManager) updateTorrentPeers(torrent *TorrentState, peers []metainfo.Address) {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
+	tm.updateTorrentPeersLocked(torrent, peers)
+}
 
+// updateTorrentPeersLocked updates the peer list for a torrent (assumes mutex is already held)
+func (tm *TorrentManager) updateTorrentPeersLocked(torrent *TorrentState, peers []metainfo.Address) {
 	// Update peer information - convert metainfo.Address to PeerInfo and deduplicate
 	newPeers := make([]PeerInfo, 0, len(peers))
 	newPeerKeys := make(map[string]bool)
@@ -2143,7 +2147,7 @@ func (tm *TorrentManager) AddPEXPeer(torrentID int64, ip net.IP, port uint16, fl
 	if torrent, exists := tm.torrents[torrentID]; exists {
 		// Convert to metainfo.Address format
 		addr := metainfo.NewAddress(ip, port)
-		tm.updateTorrentPeers(torrent, []metainfo.Address{addr})
+		tm.updateTorrentPeersLocked(torrent, []metainfo.Address{addr})
 	}
 }
 
@@ -2212,7 +2216,7 @@ func (tm *TorrentManager) onPEXPeerDiscovered(torrentID int64, ip net.IP, port u
 	if torrent, exists := tm.torrents[torrentID]; exists {
 		// Convert to metainfo.Address format
 		addr := metainfo.NewAddress(ip, port)
-		tm.updateTorrentPeers(torrent, []metainfo.Address{addr})
+		tm.updateTorrentPeersLocked(torrent, []metainfo.Address{addr})
 
 		// Update peer count for statistics
 		torrent.PeerCount++
