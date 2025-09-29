@@ -166,8 +166,9 @@ func NewTorrentManager(config TorrentManagerConfig) (*TorrentManager, error) {
 	return tm, nil
 }
 
-// applyConfigDefaults sets default values for unspecified configuration options
-func applyConfigDefaults(config *TorrentManagerConfig) {
+// applyBasicConfigDefaults sets default values for basic configuration options like logging and directories.
+// Modifies the config in place to ensure essential components have sensible defaults.
+func applyBasicConfigDefaults(config *TorrentManagerConfig) {
 	if config.ErrorLog == nil {
 		config.ErrorLog = log.Printf
 	}
@@ -175,7 +176,11 @@ func applyConfigDefaults(config *TorrentManagerConfig) {
 	if config.DownloadDir == "" {
 		config.DownloadDir = "downloads"
 	}
+}
 
+// applyNumericConfigDefaults sets default values for numeric configuration limits.
+// Ensures all peer and torrent limits have appropriate non-zero values for optimal performance.
+func applyNumericConfigDefaults(config *TorrentManagerConfig) {
 	if config.MaxTorrents <= 0 {
 		config.MaxTorrents = 100
 	}
@@ -191,8 +196,11 @@ func applyConfigDefaults(config *TorrentManagerConfig) {
 	if config.PeerPort <= 0 {
 		config.PeerPort = 51413
 	}
+}
 
-	// Set default session configuration if not provided
+// applySessionConfigDefaults sets default session configuration while preserving existing blocklist settings.
+// Creates a new default session configuration and carefully restores any pre-existing blocklist configuration.
+func applySessionConfigDefaults(config *TorrentManagerConfig) {
 	if config.SessionConfig.Version == "" {
 		// Preserve any existing blocklist settings
 		existingBlocklistEnabled := config.SessionConfig.BlocklistEnabled
@@ -204,6 +212,13 @@ func applyConfigDefaults(config *TorrentManagerConfig) {
 		config.SessionConfig.BlocklistEnabled = existingBlocklistEnabled
 		config.SessionConfig.BlocklistURL = existingBlocklistURL
 	}
+}
+
+// applyConfigDefaults sets default values for unspecified configuration options
+func applyConfigDefaults(config *TorrentManagerConfig) {
+	applyBasicConfigDefaults(config)
+	applyNumericConfigDefaults(config)
+	applySessionConfigDefaults(config)
 }
 
 // createDefaultSessionConfig creates a default session configuration with the given base config
