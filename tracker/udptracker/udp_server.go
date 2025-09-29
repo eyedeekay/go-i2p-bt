@@ -104,21 +104,37 @@ func (uts *Server) Close() {
 	}
 }
 
+// cleanConnectionID periodically removes expired connections from the server.
 func (uts *Server) cleanConnectionID(interval time.Duration) {
 	tick := time.NewTicker(interval)
 	defer tick.Stop()
+
 	for {
-		select {
-		case <-uts.exit:
+		if !uts.processTicker(tick, interval) {
 			return
-		case now := <-tick.C:
-			uts.lock.RLock()
-			for cid, wa := range uts.conns {
-				if now.Sub(wa.Time) > interval {
-					delete(uts.conns, cid)
-				}
-			}
-			uts.lock.RUnlock()
+		}
+	}
+}
+
+// processTicker handles ticker events and exits gracefully when server stops.
+func (uts *Server) processTicker(tick *time.Ticker, interval time.Duration) bool {
+	select {
+	case <-uts.exit:
+		return false
+	case now := <-tick.C:
+		uts.cleanExpiredConnections(now, interval)
+		return true
+	}
+}
+
+// cleanExpiredConnections removes connections that have exceeded the timeout interval.
+func (uts *Server) cleanExpiredConnections(now time.Time, interval time.Duration) {
+	uts.lock.Lock()
+	defer uts.lock.Unlock()
+
+	for cid, wa := range uts.conns {
+		if now.Sub(wa.Time) > interval {
+			delete(uts.conns, cid)
 		}
 	}
 }
