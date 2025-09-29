@@ -313,27 +313,37 @@ func (fm *FileManager) RenamePartialFile(partialPath, finalPath string) error {
 // This is typically called when a torrent is removed or canceled.
 func (fm *FileManager) CleanupPartialFiles(directory string, info metainfo.Info) error {
 	if info.IsDir() {
-		// Multi-file torrent
-		// file.Path(info) already includes the torrent name for multi-file torrents
-		for _, file := range info.Files {
-			partialPath := filepath.Join(directory, file.Path(info)+".part")
-			if _, err := os.Stat(partialPath); err == nil {
-				// File exists, remove it
-				if err := os.Remove(partialPath); err != nil {
-					return fmt.Errorf("failed to remove partial file %s: %w", partialPath, err)
-				}
-			}
-		}
-	} else {
-		// Single file torrent
-		partialPath := filepath.Join(directory, info.Name+".part")
-		if _, err := os.Stat(partialPath); err == nil {
-			if err := os.Remove(partialPath); err != nil {
-				return fmt.Errorf("failed to remove partial file %s: %w", partialPath, err)
-			}
+		return fm.cleanupMultiFilePartials(directory, info)
+	}
+	return fm.cleanupSingleFilePartial(directory, info)
+}
+
+// cleanupMultiFilePartials removes partial files for multi-file torrents.
+func (fm *FileManager) cleanupMultiFilePartials(directory string, info metainfo.Info) error {
+	// file.Path(info) already includes the torrent name for multi-file torrents
+	for _, file := range info.Files {
+		partialPath := filepath.Join(directory, file.Path(info)+".part")
+		if err := fm.removePartialFileIfExists(partialPath); err != nil {
+			return err
 		}
 	}
+	return nil
+}
 
+// cleanupSingleFilePartial removes the partial file for a single-file torrent.
+func (fm *FileManager) cleanupSingleFilePartial(directory string, info metainfo.Info) error {
+	partialPath := filepath.Join(directory, info.Name+".part")
+	return fm.removePartialFileIfExists(partialPath)
+}
+
+// removePartialFileIfExists checks if a partial file exists and removes it if found.
+func (fm *FileManager) removePartialFileIfExists(partialPath string) error {
+	if _, err := os.Stat(partialPath); err == nil {
+		// File exists, remove it
+		if err := os.Remove(partialPath); err != nil {
+			return fmt.Errorf("failed to remove partial file %s: %w", partialPath, err)
+		}
+	}
 	return nil
 }
 
