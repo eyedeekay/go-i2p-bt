@@ -1063,6 +1063,98 @@ func (m *RPCMethods) TorrentWebSeedGet(req TorrentWebSeedGetRequest) (TorrentWeb
 	return TorrentWebSeedGetResponse{Torrents: torrents}, nil
 }
 
+// Bandwidth Scheduling Methods
+
+// BandwidthScheduleGet implements the bandwidth-schedule-get RPC method
+func (m *RPCMethods) BandwidthScheduleGet(req BandwidthScheduleGetRequest) (BandwidthScheduleGetResponse, error) {
+	scheduler := m.manager.bandwidthScheduler
+	if scheduler == nil {
+		return BandwidthScheduleGetResponse{}, fmt.Errorf("bandwidth scheduler not available")
+	}
+
+	return BandwidthScheduleGetResponse{
+		Enabled: scheduler.IsEnabled(),
+		Rules:   scheduler.GetRules(),
+		Current: scheduler.GetCurrentRule(),
+		Stats:   scheduler.GetStats(),
+	}, nil
+}
+
+// BandwidthScheduleSet implements the bandwidth-schedule-set RPC method
+func (m *RPCMethods) BandwidthScheduleSet(req BandwidthScheduleSetRequest) error {
+	scheduler := m.manager.bandwidthScheduler
+	if scheduler == nil {
+		return fmt.Errorf("bandwidth scheduler not available")
+	}
+
+	// Update enabled state if specified
+	if req.Enabled != nil {
+		scheduler.SetEnabled(*req.Enabled)
+	}
+
+	// Replace all rules if specified
+	if req.Rules != nil {
+		// First, get current rules and remove them
+		currentRules := scheduler.GetRules()
+		for _, rule := range currentRules {
+			if err := scheduler.RemoveRule(rule.Name); err != nil {
+				return fmt.Errorf("failed to remove existing rule %s: %w", rule.Name, err)
+			}
+		}
+
+		// Add new rules
+		for _, rule := range req.Rules {
+			if err := scheduler.AddRule(rule); err != nil {
+				return fmt.Errorf("failed to add rule %s: %w", rule.Name, err)
+			}
+		}
+	}
+
+	return nil
+}
+
+// BandwidthScheduleRuleAdd implements the bandwidth-schedule-rule-add RPC method
+func (m *RPCMethods) BandwidthScheduleRuleAdd(req BandwidthScheduleRuleAddRequest) error {
+	scheduler := m.manager.bandwidthScheduler
+	if scheduler == nil {
+		return fmt.Errorf("bandwidth scheduler not available")
+	}
+
+	if req.Rule == nil {
+		return fmt.Errorf("rule cannot be nil")
+	}
+
+	return scheduler.AddRule(req.Rule)
+}
+
+// BandwidthScheduleRuleRemove implements the bandwidth-schedule-rule-remove RPC method
+func (m *RPCMethods) BandwidthScheduleRuleRemove(req BandwidthScheduleRuleRemoveRequest) error {
+	scheduler := m.manager.bandwidthScheduler
+	if scheduler == nil {
+		return fmt.Errorf("bandwidth scheduler not available")
+	}
+
+	if req.Name == "" {
+		return fmt.Errorf("rule name cannot be empty")
+	}
+
+	return scheduler.RemoveRule(req.Name)
+}
+
+// BandwidthScheduleRuleUpdate implements the bandwidth-schedule-rule-update RPC method
+func (m *RPCMethods) BandwidthScheduleRuleUpdate(req BandwidthScheduleRuleUpdateRequest) error {
+	scheduler := m.manager.bandwidthScheduler
+	if scheduler == nil {
+		return fmt.Errorf("bandwidth scheduler not available")
+	}
+
+	if req.Rule == nil {
+		return fmt.Errorf("rule cannot be nil")
+	}
+
+	return scheduler.UpdateRule(req.Rule)
+}
+
 // SessionGet implements the session-get RPC method
 func (m *RPCMethods) SessionGet() (SessionGetResponse, error) {
 	config := m.manager.GetSessionConfig()
@@ -1636,6 +1728,16 @@ func (m *RPCMethods) getSpecialRequestHandler(method string) func(json.RawMessag
 		return m.createTorrentWebSeedRemoveWrapper()
 	case "torrent-webseed-get":
 		return m.createTorrentWebSeedGetWrapper()
+	case "bandwidth-schedule-get":
+		return m.createBandwidthScheduleGetWrapper()
+	case "bandwidth-schedule-set":
+		return m.createBandwidthScheduleSetWrapper()
+	case "bandwidth-schedule-rule-add":
+		return m.createBandwidthScheduleRuleAddWrapper()
+	case "bandwidth-schedule-rule-remove":
+		return m.createBandwidthScheduleRuleRemoveWrapper()
+	case "bandwidth-schedule-rule-update":
+		return m.createBandwidthScheduleRuleUpdateWrapper()
 	case "session-set":
 		return m.createSessionSetWrapper()
 	default:
@@ -1749,6 +1851,63 @@ func (m *RPCMethods) createTorrentWebSeedGetWrapper() func(json.RawMessage) (int
 	}
 }
 
+// Bandwidth Scheduling Wrapper Functions
+
+// createBandwidthScheduleGetWrapper creates a wrapper function for the bandwidth-schedule-get method.
+func (m *RPCMethods) createBandwidthScheduleGetWrapper() func(json.RawMessage) (interface{}, error) {
+	return func(params json.RawMessage) (interface{}, error) {
+		var req BandwidthScheduleGetRequest
+		if err := json.Unmarshal(params, &req); err != nil {
+			return nil, &RPCError{Code: ErrCodeInvalidParams, Message: err.Error()}
+		}
+		return m.BandwidthScheduleGet(req)
+	}
+}
+
+// createBandwidthScheduleSetWrapper creates a wrapper function for the bandwidth-schedule-set method.
+func (m *RPCMethods) createBandwidthScheduleSetWrapper() func(json.RawMessage) (interface{}, error) {
+	return func(params json.RawMessage) (interface{}, error) {
+		var req BandwidthScheduleSetRequest
+		if err := json.Unmarshal(params, &req); err != nil {
+			return nil, &RPCError{Code: ErrCodeInvalidParams, Message: err.Error()}
+		}
+		return nil, m.BandwidthScheduleSet(req)
+	}
+}
+
+// createBandwidthScheduleRuleAddWrapper creates a wrapper function for the bandwidth-schedule-rule-add method.
+func (m *RPCMethods) createBandwidthScheduleRuleAddWrapper() func(json.RawMessage) (interface{}, error) {
+	return func(params json.RawMessage) (interface{}, error) {
+		var req BandwidthScheduleRuleAddRequest
+		if err := json.Unmarshal(params, &req); err != nil {
+			return nil, &RPCError{Code: ErrCodeInvalidParams, Message: err.Error()}
+		}
+		return nil, m.BandwidthScheduleRuleAdd(req)
+	}
+}
+
+// createBandwidthScheduleRuleRemoveWrapper creates a wrapper function for the bandwidth-schedule-rule-remove method.
+func (m *RPCMethods) createBandwidthScheduleRuleRemoveWrapper() func(json.RawMessage) (interface{}, error) {
+	return func(params json.RawMessage) (interface{}, error) {
+		var req BandwidthScheduleRuleRemoveRequest
+		if err := json.Unmarshal(params, &req); err != nil {
+			return nil, &RPCError{Code: ErrCodeInvalidParams, Message: err.Error()}
+		}
+		return nil, m.BandwidthScheduleRuleRemove(req)
+	}
+}
+
+// createBandwidthScheduleRuleUpdateWrapper creates a wrapper function for the bandwidth-schedule-rule-update method.
+func (m *RPCMethods) createBandwidthScheduleRuleUpdateWrapper() func(json.RawMessage) (interface{}, error) {
+	return func(params json.RawMessage) (interface{}, error) {
+		var req BandwidthScheduleRuleUpdateRequest
+		if err := json.Unmarshal(params, &req); err != nil {
+			return nil, &RPCError{Code: ErrCodeInvalidParams, Message: err.Error()}
+		}
+		return nil, m.BandwidthScheduleRuleUpdate(req)
+	}
+}
+
 // GetSupportedMethods returns a list of all supported RPC methods
 func (m *RPCMethods) GetSupportedMethods() []string {
 	return []string{
@@ -1764,6 +1923,11 @@ func (m *RPCMethods) GetSupportedMethods() []string {
 		"torrent-webseed-add",
 		"torrent-webseed-remove",
 		"torrent-webseed-get",
+		"bandwidth-schedule-get",
+		"bandwidth-schedule-set",
+		"bandwidth-schedule-rule-add",
+		"bandwidth-schedule-rule-remove",
+		"bandwidth-schedule-rule-update",
 		"session-get",
 		"session-set",
 		"session-stats",

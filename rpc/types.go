@@ -644,3 +644,39 @@ type WebSeedInfo struct {
 	Downloaded int64  `json:"downloaded"`
 	Speed      int64  `json:"speed"`
 }
+
+// Bandwidth Scheduling RPC Types
+
+// BandwidthScheduleGetRequest represents the request for bandwidth-schedule-get method
+type BandwidthScheduleGetRequest struct {
+	// No parameters needed - returns all rules
+}
+
+// BandwidthScheduleGetResponse represents the response for bandwidth-schedule-get method
+type BandwidthScheduleGetResponse struct {
+	Enabled bool                     `json:"enabled"`
+	Rules   []*BandwidthScheduleRule `json:"rules"`
+	Current *BandwidthScheduleRule   `json:"current,omitempty"`
+	Stats   map[string]interface{}   `json:"stats"`
+}
+
+// BandwidthScheduleSetRequest represents the request for bandwidth-schedule-set method
+type BandwidthScheduleSetRequest struct {
+	Enabled *bool                    `json:"enabled,omitempty"`
+	Rules   []*BandwidthScheduleRule `json:"rules,omitempty"`
+}
+
+// BandwidthScheduleRuleAddRequest represents the request for bandwidth-schedule-rule-add method
+type BandwidthScheduleRuleAddRequest struct {
+	Rule *BandwidthScheduleRule `json:"rule"`
+}
+
+// BandwidthScheduleRuleRemoveRequest represents the request for bandwidth-schedule-rule-remove method
+type BandwidthScheduleRuleRemoveRequest struct {
+	Name string `json:"name"`
+}
+
+// BandwidthScheduleRuleUpdateRequest represents the request for bandwidth-schedule-rule-update method
+type BandwidthScheduleRuleUpdateRequest struct {
+	Rule *BandwidthScheduleRule `json:"rule"`
+}

@@ -74,15 +74,16 @@ type TorrentManager struct {
 	config TorrentManagerConfig
 
 	// Core components
-	dhtServer        *dht.Server
-	dhtConn          net.PacketConn
-	downloader       *downloader.TorrentDownloader
-	queueManager     *QueueManager
-	bandwidthManager *BandwidthManager
-	blocklistManager *BlocklistManager
-	scriptManager    *ScriptManager
-	pexManager       *PEXManager
-	webseedManager   *WebSeedManager
+	dhtServer          *dht.Server
+	dhtConn            net.PacketConn
+	downloader         *downloader.TorrentDownloader
+	queueManager       *QueueManager
+	bandwidthManager   *BandwidthManager
+	bandwidthScheduler *BandwidthScheduler
+	blocklistManager   *BlocklistManager
+	scriptManager      *ScriptManager
+	pexManager         *PEXManager
+	webseedManager     *WebSeedManager
 
 	// Thread-safe torrent storage
 	mu       sync.RWMutex
@@ -139,6 +140,33 @@ func NewTorrentManager(config TorrentManagerConfig) (*TorrentManager, error) {
 
 	// Initialize bandwidth manager with session configuration
 	tm.bandwidthManager = NewBandwidthManager(config.SessionConfig)
+
+	// Initialize bandwidth scheduler with bandwidth manager
+	tm.bandwidthScheduler = NewBandwidthScheduler(tm.bandwidthManager)
+
+	// Set up callback to update bandwidth limits when schedule changes
+	tm.bandwidthScheduler.SetUpdateCallback(func(downloadLimit, uploadLimit int64) {
+		tm.sessionMu.Lock()
+		defer tm.sessionMu.Unlock()
+
+		// Update session configuration with scheduled limits
+		if downloadLimit > 0 {
+			tm.sessionConfig.SpeedLimitDown = downloadLimit
+			tm.sessionConfig.SpeedLimitDownEnabled = true
+		} else {
+			tm.sessionConfig.SpeedLimitDownEnabled = false
+		}
+
+		if uploadLimit > 0 {
+			tm.sessionConfig.SpeedLimitUp = uploadLimit
+			tm.sessionConfig.SpeedLimitUpEnabled = true
+		} else {
+			tm.sessionConfig.SpeedLimitUpEnabled = false
+		}
+
+		// Apply changes to bandwidth manager
+		tm.bandwidthManager.UpdateConfiguration(tm.sessionConfig)
+	})
 
 	// Initialize blocklist manager with session configuration
 	tm.blocklistManager = NewBlocklistManager()
@@ -318,6 +346,10 @@ func (tm *TorrentManager) startBackgroundProcesses() {
 // Close shuts down the TorrentManager and releases resources
 func (tm *TorrentManager) Close() error {
 	tm.cancel()
+
+	if tm.bandwidthScheduler != nil {
+		tm.bandwidthScheduler.Stop()
+	}
 
 	if tm.queueManager != nil {
 		tm.queueManager.Close()
