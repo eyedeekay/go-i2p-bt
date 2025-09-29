@@ -54,39 +54,11 @@ type WebHandler struct {
 // NewWebHandler creates a new web interface handler
 // Returns error if configuration is invalid or static directory doesn't exist
 func NewWebHandler(config WebHandlerConfig, server *Server) (*WebHandler, error) {
-	// Validate and set defaults
-	if config.StaticDir == "" {
-		return nil, fmt.Errorf("StaticDir is required")
+	if err := validateWebHandlerConfig(&config); err != nil {
+		return nil, err
 	}
 
-	if config.URLPrefix == "" {
-		config.URLPrefix = "/web/"
-	}
-
-	// Ensure URLPrefix starts and ends with "/"
-	if !strings.HasPrefix(config.URLPrefix, "/") {
-		config.URLPrefix = "/" + config.URLPrefix
-	}
-	if !strings.HasSuffix(config.URLPrefix, "/") {
-		config.URLPrefix = config.URLPrefix + "/"
-	}
-
-	if config.IndexFile == "" {
-		config.IndexFile = "index.html"
-	}
-
-	if config.MaxAge == 0 {
-		config.MaxAge = 3600 // 1 hour default cache
-	}
-
-	// Create file server with security-focused configuration
-	var fileServer http.Handler
-	if config.EnableDirectoryListing {
-		fileServer = http.FileServer(http.Dir(config.StaticDir))
-	} else {
-		// Use custom file server that denies directory listing
-		fileServer = http.FileServer(noDirectoryListingFS{http.Dir(config.StaticDir)})
-	}
+	fileServer := createFileServer(config)
 
 	handler := &WebHandler{
 		config:     config,
@@ -95,6 +67,52 @@ func NewWebHandler(config WebHandlerConfig, server *Server) (*WebHandler, error)
 	}
 
 	return handler, nil
+}
+
+// validateWebHandlerConfig validates and sets defaults for web handler configuration.
+func validateWebHandlerConfig(config *WebHandlerConfig) error {
+	if config.StaticDir == "" {
+		return fmt.Errorf("StaticDir is required")
+	}
+
+	normalizeURLPrefix(config)
+	setConfigDefaults(config)
+
+	return nil
+}
+
+// normalizeURLPrefix ensures URLPrefix starts and ends with "/".
+func normalizeURLPrefix(config *WebHandlerConfig) {
+	if config.URLPrefix == "" {
+		config.URLPrefix = "/web/"
+	}
+
+	if !strings.HasPrefix(config.URLPrefix, "/") {
+		config.URLPrefix = "/" + config.URLPrefix
+	}
+	if !strings.HasSuffix(config.URLPrefix, "/") {
+		config.URLPrefix = config.URLPrefix + "/"
+	}
+}
+
+// setConfigDefaults sets default values for unspecified configuration options.
+func setConfigDefaults(config *WebHandlerConfig) {
+	if config.IndexFile == "" {
+		config.IndexFile = "index.html"
+	}
+
+	if config.MaxAge == 0 {
+		config.MaxAge = 3600 // 1 hour default cache
+	}
+}
+
+// createFileServer creates the appropriate file server based on configuration.
+func createFileServer(config WebHandlerConfig) http.Handler {
+	if config.EnableDirectoryListing {
+		return http.FileServer(http.Dir(config.StaticDir))
+	}
+	// Use custom file server that denies directory listing
+	return http.FileServer(noDirectoryListingFS{http.Dir(config.StaticDir)})
 }
 
 // ServeHTTP handles static file requests with security headers and authentication
