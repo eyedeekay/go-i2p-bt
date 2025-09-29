@@ -72,12 +72,18 @@ type Server struct {
 	errorCount   int64
 }
 
-// NewServer creates a new RPC server with the given configuration
-func NewServer(config ServerConfig) (*Server, error) {
+// validateServerConfig validates the required configuration parameters.
+// Returns an error if any required configuration is missing or invalid.
+func validateServerConfig(config ServerConfig) error {
 	if config.TorrentManager == nil {
-		return nil, fmt.Errorf("TorrentManager is required")
+		return fmt.Errorf("TorrentManager is required")
 	}
+	return nil
+}
 
+// applyServerConfigDefaults applies default values to optional configuration parameters.
+// Modifies the config in place to set appropriate defaults for unspecified values.
+func applyServerConfigDefaults(config *ServerConfig) {
 	if config.ErrorLog == nil {
 		config.ErrorLog = log.Printf
 	}
@@ -103,14 +109,28 @@ func NewServer(config ServerConfig) (*Server, error) {
 	if config.MaxRequestSize == 0 {
 		config.MaxRequestSize = 10 * 1024 * 1024 // 10MB
 	}
+}
 
-	server := &Server{
+// createServerInstance creates and initializes a new Server instance with the provided configuration.
+// Returns a fully initialized server ready for use.
+func createServerInstance(config ServerConfig) *Server {
+	return &Server{
 		config:      config,
 		methods:     NewRPCMethods(config.TorrentManager),
 		sessionID:   generateSessionID(),
 		sessionTime: time.Now(),
 	}
+}
 
+// NewServer creates a new RPC server with the given configuration
+func NewServer(config ServerConfig) (*Server, error) {
+	if err := validateServerConfig(config); err != nil {
+		return nil, err
+	}
+
+	applyServerConfigDefaults(&config)
+
+	server := createServerInstance(config)
 	return server, nil
 }
 
