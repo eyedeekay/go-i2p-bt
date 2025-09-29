@@ -416,7 +416,9 @@ func (tm *TorrentManager) AddTorrent(req TorrentAddRequest) (*TorrentState, erro
 
 	atomic.AddInt64(&tm.stats.TorrentsAdded, 1)
 
-	return torrentState, nil
+	// Return a copy to prevent concurrent access to the live state
+	torrentCopy := *torrentState
+	return &torrentCopy, nil
 }
 
 // validateTorrentLimit checks if adding a new torrent would exceed the maximum limit
@@ -581,7 +583,10 @@ func (tm *TorrentManager) handleTorrentStartup(torrentState *TorrentState, pause
 		go tm.startTorrent(torrentState)
 	} else if hasMetadata {
 		// Even if paused, verify existing data
-		go tm.VerifyTorrent(torrentState.ID)
+		// Set status to verifying before releasing the lock
+		torrentState.Status = TorrentStatusVerifying
+		tm.log("Starting verification for torrent %s", torrentState.InfoHash.HexString())
+		go tm.verifyTorrentAsync(torrentState)
 	}
 }
 
@@ -1795,6 +1800,12 @@ func (tm *TorrentManager) VerifyTorrent(id int64) error {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 
+	return tm.verifyTorrentLocked(id)
+}
+
+// verifyTorrentLocked is an internal method that verifies a torrent
+// Assumes the caller already holds tm.mu lock
+func (tm *TorrentManager) verifyTorrentLocked(id int64) error {
 	torrent, exists := tm.torrents[id]
 	if !exists {
 		return fmt.Errorf("torrent with ID %d not found", id)
