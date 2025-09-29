@@ -87,7 +87,7 @@ func (ws *WebSeedManager) SetEnabled(enabled bool) {
 }
 
 // AddWebSeed adds a web seed for a torrent
-func (ws *WebSeedManager) AddWebSeed(torrentID string, webseedURL string, seedType WebSeedType) error {
+func (ws *WebSeedManager) AddWebSeed(torrentID, webseedURL string, seedType WebSeedType) error {
 	if !ws.IsEnabled() {
 		return nil
 	}
@@ -136,7 +136,7 @@ func (ws *WebSeedManager) AddWebSeed(torrentID string, webseedURL string, seedTy
 }
 
 // RemoveWebSeed removes a web seed
-func (ws *WebSeedManager) RemoveWebSeed(torrentID string, webseedURL string) {
+func (ws *WebSeedManager) RemoveWebSeed(torrentID, webseedURL string) {
 	ws.mu.Lock()
 	defer ws.mu.Unlock()
 

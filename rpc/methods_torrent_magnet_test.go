@@ -51,7 +51,6 @@ func TestTorrentMagnet(t *testing.T) {
 		// Test getting all magnet links (no IDs specified)
 		req := TorrentMagnetRequest{}
 		response, err := methods.TorrentMagnet(req)
-
 		if err != nil {
 			t.Fatalf("TorrentMagnet failed: %v", err)
 		}
@@ -85,7 +84,6 @@ func TestTorrentMagnet(t *testing.T) {
 		// Test getting magnet links for specific IDs
 		req := TorrentMagnetRequest{IDs: []int64{1}}
 		response, err := methods.TorrentMagnet(req)
-
 		if err != nil {
 			t.Fatalf("TorrentMagnet failed: %v", err)
 		}
@@ -104,7 +102,6 @@ func TestTorrentMagnet(t *testing.T) {
 		// Test getting magnet links for non-existent torrent ID
 		req := TorrentMagnetRequest{IDs: []int64{999}}
 		response, err := methods.TorrentMagnet(req)
-
 		if err != nil {
 			t.Fatalf("TorrentMagnet failed: %v", err)
 		}
@@ -119,7 +116,6 @@ func TestTorrentMagnet(t *testing.T) {
 		// Test getting magnet links for mix of valid and invalid IDs
 		req := TorrentMagnetRequest{IDs: []int64{1, 999, 2}}
 		response, err := methods.TorrentMagnet(req)
-
 		if err != nil {
 			t.Fatalf("TorrentMagnet failed: %v", err)
 		}
