@@ -581,13 +581,14 @@ func (tm *TorrentManager) extractTrackerList(torrentState *TorrentState, metaInf
 func (tm *TorrentManager) handleTorrentStartup(torrentState *TorrentState, paused, hasMetadata bool) {
 	if !paused && tm.sessionConfig.StartAddedTorrents {
 		go tm.startTorrent(torrentState)
-	} else if hasMetadata {
-		// Even if paused, verify existing data
+	} else if !paused && hasMetadata {
+		// Verify existing data for non-paused torrents only
 		// Set status to verifying before releasing the lock
 		torrentState.Status = TorrentStatusVerifying
 		tm.log("Starting verification for torrent %s", torrentState.InfoHash.HexString())
 		go tm.verifyTorrentAsync(torrentState)
 	}
+	// Paused torrents remain in their current status (TorrentStatusStopped)
 }
 
 // GetTorrent retrieves torrent information by ID
