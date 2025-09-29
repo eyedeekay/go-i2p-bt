@@ -95,21 +95,37 @@ type blacklist struct {
 	num  int
 }
 
+// loop periodically removes expired IP addresses from the blacklist.
 func (bl *blacklist) loop(interval time.Duration) {
 	tick := time.NewTicker(interval)
 	defer tick.Stop()
+
 	for {
-		select {
-		case <-bl.exit:
+		if !bl.processTickerEvent(tick, interval) {
 			return
-		case now := <-tick.C:
-			bl.lock.Lock()
-			for ip, wp := range bl.ips {
-				if now.Sub(wp.Time) > interval {
-					delete(bl.ips, ip)
-				}
-			}
-			bl.lock.Unlock()
+		}
+	}
+}
+
+// processTickerEvent handles ticker events and exits gracefully when blacklist is closed.
+func (bl *blacklist) processTickerEvent(tick *time.Ticker, interval time.Duration) bool {
+	select {
+	case <-bl.exit:
+		return false
+	case now := <-tick.C:
+		bl.cleanExpiredEntries(now, interval)
+		return true
+	}
+}
+
+// cleanExpiredEntries removes blacklist entries that have exceeded the timeout interval.
+func (bl *blacklist) cleanExpiredEntries(now time.Time, interval time.Duration) {
+	bl.lock.Lock()
+	defer bl.lock.Unlock()
+
+	for ip, wp := range bl.ips {
+		if now.Sub(wp.Time) > interval {
+			delete(bl.ips, ip)
 		}
 	}
 }
