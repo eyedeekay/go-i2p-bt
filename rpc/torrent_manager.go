@@ -32,6 +32,7 @@ import (
 	"github.com/go-i2p/go-i2p-bt/dht"
 	"github.com/go-i2p/go-i2p-bt/downloader"
 	"github.com/go-i2p/go-i2p-bt/metainfo"
+	"github.com/go-i2p/go-i2p-bt/peerprotocol"
 )
 
 // TorrentManagerConfig configures the TorrentManager
@@ -80,6 +81,8 @@ type TorrentManager struct {
 	bandwidthManager *BandwidthManager
 	blocklistManager *BlocklistManager
 	scriptManager    *ScriptManager
+	pexManager       *PEXManager
+	webseedManager   *WebSeedManager
 
 	// Thread-safe torrent storage
 	mu       sync.RWMutex
@@ -150,6 +153,12 @@ func NewTorrentManager(config TorrentManagerConfig) (*TorrentManager, error) {
 	tm.scriptManager = NewScriptManager()
 	tm.scriptManager.SetLogger(tm.log)
 	tm.updateScriptConfiguration(config.SessionConfig)
+
+	// Initialize PEX manager
+	tm.pexManager = NewPEXManager(config.SessionConfig.PEXEnabled)
+
+	// Initialize WebSeed manager
+	tm.webseedManager = NewWebSeedManager(config.SessionConfig.WebSeedsEnabled)
 
 	// Initialize DHT server if enabled
 	if err := tm.initializeDHTServer(); err != nil {
@@ -234,6 +243,7 @@ func createDefaultSessionConfig(config TorrentManagerConfig) SessionConfiguratio
 		PEXEnabled:            true,
 		LPDEnabled:            false,
 		UTPEnabled:            true,
+		WebSeedsEnabled:       true,
 		Encryption:            "preferred",
 		SpeedLimitDown:        100,
 		SpeedLimitDownEnabled: false,
@@ -895,6 +905,10 @@ func (tm *TorrentManager) applyRuntimeConfigChanges(oldConfig, newConfig Session
 
 	tm.applyScriptConfigChanges(oldConfig, newConfig)
 
+	tm.applyPEXConfigChanges(oldConfig, newConfig)
+
+	tm.applyWebSeedConfigChanges(oldConfig, newConfig)
+
 	return nil
 }
 
@@ -974,6 +988,20 @@ func (tm *TorrentManager) applyScriptConfigChanges(oldConfig, newConfig SessionC
 	if oldConfig.ScriptTorrentDoneEnabled != newConfig.ScriptTorrentDoneEnabled ||
 		oldConfig.ScriptTorrentDoneFilename != newConfig.ScriptTorrentDoneFilename {
 		tm.updateScriptConfiguration(newConfig)
+	}
+}
+
+// applyPEXConfigChanges updates PEX configuration if PEX settings have changed
+func (tm *TorrentManager) applyPEXConfigChanges(oldConfig, newConfig SessionConfiguration) {
+	if oldConfig.PEXEnabled != newConfig.PEXEnabled {
+		tm.updatePEXConfiguration(newConfig)
+	}
+}
+
+// applyWebSeedConfigChanges updates WebSeed configuration if settings have changed
+func (tm *TorrentManager) applyWebSeedConfigChanges(oldConfig, newConfig SessionConfiguration) {
+	if oldConfig.WebSeedsEnabled != newConfig.WebSeedsEnabled {
+		tm.updateWebSeedConfiguration(newConfig)
 	}
 }
 
@@ -1076,6 +1104,20 @@ func (tm *TorrentManager) updateBlocklistConfiguration(config SessionConfigurati
 		config.BlocklistEnabled, config.BlocklistURL, tm.blocklistManager.GetSize())
 
 	return nil
+}
+
+// updatePEXConfiguration updates PEX (Peer Exchange) settings
+func (tm *TorrentManager) updatePEXConfiguration(config SessionConfiguration) {
+	tm.pexManager.SetEnabled(config.PEXEnabled)
+
+	tm.log("PEX configuration updated: enabled=%t", config.PEXEnabled)
+}
+
+// updateWebSeedConfiguration updates WebSeed settings
+func (tm *TorrentManager) updateWebSeedConfiguration(config SessionConfiguration) {
+	tm.webseedManager.SetEnabled(config.WebSeedsEnabled)
+
+	tm.log("WebSeed configuration updated: enabled=%t", config.WebSeedsEnabled)
 }
 
 // updateScriptConfiguration updates script hook settings for lifecycle events
@@ -2080,4 +2122,126 @@ func (tm *TorrentManager) WaitForUploadBandwidth(ctx context.Context, bytes int6
 // GetBandwidthStats returns current bandwidth limiter statistics
 func (tm *TorrentManager) GetBandwidthStats() (downloadTokens, downloadMax, uploadTokens, uploadMax int64) {
 	return tm.bandwidthManager.GetStats()
+}
+
+// PEX (Peer Exchange) Methods
+
+// AddPEXPeer adds a peer discovered through PEX to the torrent's peer list
+func (tm *TorrentManager) AddPEXPeer(torrentID int64, ip net.IP, port uint16, flags byte) {
+	if !tm.pexManager.IsEnabled() {
+		return
+	}
+
+	// Add to PEX manager
+	torrentIDStr := fmt.Sprintf("%d", torrentID)
+	tm.pexManager.AddPeer(torrentIDStr, ip, port, flags)
+
+	// Update torrent peer statistics
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+
+	if torrent, exists := tm.torrents[torrentID]; exists {
+		// Convert to metainfo.Address format
+		addr := metainfo.NewAddress(ip, port)
+		tm.updateTorrentPeers(torrent, []metainfo.Address{addr})
+	}
+}
+
+// ProcessPEXMessage processes an incoming PEX message for a torrent
+func (tm *TorrentManager) ProcessPEXMessage(torrentID int64, pexData []byte) error {
+	if !tm.pexManager.IsEnabled() {
+		return nil
+	}
+
+	// Decode PEX message
+	var pexMsg peerprotocol.UtPexExtendedMsg
+	if err := pexMsg.DecodeFromPayload(pexData); err != nil {
+		return fmt.Errorf("failed to decode PEX message: %w", err)
+	}
+
+	// Process the message
+	torrentIDStr := fmt.Sprintf("%d", torrentID)
+	tm.pexManager.ProcessPEXMessage(torrentIDStr, &pexMsg, func(tID string, ip net.IP, port uint16) {
+		// Callback to add discovered peers to the torrent
+		if torrentIDParsed, err := fmt.Sscanf(tID, "%d"); err == nil {
+			tm.onPEXPeerDiscovered(int64(torrentIDParsed), ip, port)
+		}
+	})
+
+	return nil
+}
+
+// GetPEXMessage generates a PEX message for a torrent to send to peers
+func (tm *TorrentManager) GetPEXMessage(torrentID int64) ([]byte, error) {
+	if !tm.pexManager.IsEnabled() {
+		return nil, nil
+	}
+
+	torrentIDStr := fmt.Sprintf("%d", torrentID)
+	pexMsg, err := tm.pexManager.GetPEXMessage(torrentIDStr)
+	if err != nil || pexMsg == nil {
+		return nil, err
+	}
+
+	return pexMsg.EncodeToBytes()
+}
+
+// ShouldSendPEX returns true if it's time to send a PEX message for the torrent
+func (tm *TorrentManager) ShouldSendPEX(torrentID int64) bool {
+	if !tm.pexManager.IsEnabled() {
+		return false
+	}
+
+	torrentIDStr := fmt.Sprintf("%d", torrentID)
+	return tm.pexManager.ShouldSendPEX(torrentIDStr)
+}
+
+// GetPEXStats returns PEX statistics
+func (tm *TorrentManager) GetPEXStats() map[string]interface{} {
+	return tm.pexManager.GetStats()
+}
+
+// onPEXPeerDiscovered is called when a new peer is discovered through PEX
+func (tm *TorrentManager) onPEXPeerDiscovered(torrentID int64, ip net.IP, port uint16) {
+	tm.log("PEX discovered peer %s:%d for torrent %d", ip.String(), port, torrentID)
+
+	// Add peer to the torrent's peer list and attempt connection
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+
+	if torrent, exists := tm.torrents[torrentID]; exists {
+		// Convert to metainfo.Address format
+		addr := metainfo.NewAddress(ip, port)
+		tm.updateTorrentPeers(torrent, []metainfo.Address{addr})
+
+		// Update peer count for statistics
+		torrent.PeerCount++
+	}
+}
+
+// WebSeed Methods
+
+// AddWebSeed adds a webseed to a torrent
+func (tm *TorrentManager) AddWebSeed(torrentID int64, webseedURL string, seedType WebSeedType) error {
+	return tm.webseedManager.AddWebSeed(fmt.Sprintf("%d", torrentID), webseedURL, seedType)
+}
+
+// RemoveWebSeed removes a webseed from a torrent
+func (tm *TorrentManager) RemoveWebSeed(torrentID int64, webseedURL string) {
+	tm.webseedManager.RemoveWebSeed(fmt.Sprintf("%d", torrentID), webseedURL)
+}
+
+// GetWebSeeds returns all webseeds for a torrent
+func (tm *TorrentManager) GetWebSeeds(torrentID int64) []*WebSeed {
+	return tm.webseedManager.GetWebSeeds(fmt.Sprintf("%d", torrentID))
+}
+
+// GetWebSeedStats returns WebSeed statistics
+func (tm *TorrentManager) GetWebSeedStats() map[string]interface{} {
+	return tm.webseedManager.GetStats()
+}
+
+// RetryFailedWebSeeds retries failed webseeds for a torrent
+func (tm *TorrentManager) RetryFailedWebSeeds(torrentID int64) int {
+	return tm.webseedManager.RetryFailedSeeds(fmt.Sprintf("%d", torrentID))
 }

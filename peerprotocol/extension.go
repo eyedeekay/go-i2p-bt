@@ -193,3 +193,49 @@ func (um *UtMetadataExtendedMsg) DecodeFromPayload(b []byte) (err error) {
 	}
 	return
 }
+
+// CompactPeer represents a single peer in compact format for PEX
+type CompactPeer struct {
+	IP   CompactIP `bencode:"ip"`
+	Port uint16    `bencode:"port"`
+}
+
+// String returns a string representation of the compact peer
+func (cp CompactPeer) String() string {
+	return cp.IP.String() + ":" + string(rune(cp.Port))
+}
+
+// UtPexExtendedMsg represents the "ut_pex" extended message for peer exchange.
+// This implements BEP 11 for peer exchange protocol
+type UtPexExtendedMsg struct {
+	// Added peers since last PEX message
+	Added   []CompactPeer `bencode:"added"`
+	AddedF  []byte        `bencode:"added.f"`  // Flags for added peers
+	Added6  []CompactPeer `bencode:"added6"`   // IPv6 peers
+	Added6F []byte        `bencode:"added6.f"` // Flags for IPv6 peers
+
+	// Dropped peers since last PEX message
+	Dropped  []CompactPeer `bencode:"dropped"`
+	Dropped6 []CompactPeer `bencode:"dropped6"` // IPv6 peers
+}
+
+// EncodeToPayload encodes UtPexExtendedMsg to extended payload
+// and writes the result into buf.
+func (pm UtPexExtendedMsg) EncodeToPayload(buf *bytes.Buffer) (err error) {
+	buf.Grow(len(pm.Added)*6 + len(pm.Dropped)*6 + 100)
+	return bencode.NewEncoder(buf).Encode(pm)
+}
+
+// EncodeToBytes encodes the PEX message to bytes
+func (pm UtPexExtendedMsg) EncodeToBytes() (b []byte, err error) {
+	buf := bytes.NewBuffer(make([]byte, 0, 256))
+	if err = pm.EncodeToPayload(buf); err == nil {
+		b = buf.Bytes()
+	}
+	return
+}
+
+// DecodeFromPayload decodes the extended payload to itself.
+func (pm *UtPexExtendedMsg) DecodeFromPayload(b []byte) (err error) {
+	return bencode.DecodeBytes(b, pm)
+}

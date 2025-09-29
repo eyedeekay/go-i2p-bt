@@ -875,6 +875,176 @@ func (m *RPCMethods) updateTorrentLocation(torrent *TorrentState, location strin
 	return nil
 }
 
+// TorrentMagnet implements the torrent-magnet RPC method
+// This method generates magnet links from existing torrents for easy sharing
+func (m *RPCMethods) TorrentMagnet(req TorrentMagnetRequest) (TorrentMagnetResponse, error) {
+	torrents := m.manager.GetAllTorrents()
+	var magnets []TorrentMagnet
+
+	// If no IDs specified, return magnet links for all torrents
+	if len(req.IDs) == 0 {
+		for _, torrent := range torrents {
+			magnetLink := m.generateMagnetLink(torrent)
+			magnets = append(magnets, TorrentMagnet{
+				ID:         torrent.ID,
+				Name:       getName(torrent),
+				HashString: torrent.InfoHash.HexString(),
+				MagnetLink: magnetLink,
+			})
+		}
+	} else {
+		// Return magnet links for specified torrent IDs
+		for _, id := range req.IDs {
+			torrent, err := m.manager.GetTorrent(id)
+			if err == nil && torrent != nil {
+				magnetLink := m.generateMagnetLink(torrent)
+				magnets = append(magnets, TorrentMagnet{
+					ID:         torrent.ID,
+					Name:       getName(torrent),
+					HashString: torrent.InfoHash.HexString(),
+					MagnetLink: magnetLink,
+				})
+			}
+		}
+	}
+
+	return TorrentMagnetResponse{Magnets: magnets}, nil
+}
+
+// generateMagnetLink creates a magnet URI from a torrent state
+func (m *RPCMethods) generateMagnetLink(state *TorrentState) string {
+	if state.MetaInfo != nil {
+		magnet := state.MetaInfo.Magnet("", state.InfoHash)
+		return magnet.String()
+	}
+
+	// Fallback: create basic magnet link with info hash and name only
+	name := getName(state)
+	if name == "" {
+		name = state.InfoHash.HexString()
+	}
+
+	// Create basic magnet link
+	return fmt.Sprintf("magnet:?xt=urn:btih:%s&dn=%s",
+		state.InfoHash.HexString(),
+		strings.ReplaceAll(name, " ", "%20"))
+}
+
+// WebSeed RPC Methods
+
+// TorrentWebSeedAdd implements the torrent-webseed-add RPC method
+func (m *RPCMethods) TorrentWebSeedAdd(req TorrentWebSeedAddRequest) error {
+	if req.URL == "" {
+		return &RPCError{
+			Code:    ErrCodeInvalidArgument,
+			Message: "webseed URL is required",
+		}
+	}
+
+	// Default to HTTP/FTP seeding type if not specified
+	seedType := WebSeedTypeHTTPFTP
+	if req.Type != "" {
+		switch req.Type {
+		case "url-list":
+			seedType = WebSeedTypeHTTPFTP
+		case "url-data":
+			seedType = WebSeedTypeGetRight
+		default:
+			return &RPCError{
+				Code:    ErrCodeInvalidArgument,
+				Message: "invalid webseed type: must be 'url-list' or 'url-data'",
+			}
+		}
+	}
+
+	// If no IDs specified, apply to all torrents
+	torrentIDs := req.IDs
+	if len(torrentIDs) == 0 {
+		torrents := m.manager.GetAllTorrents()
+		for _, torrent := range torrents {
+			torrentIDs = append(torrentIDs, torrent.ID)
+		}
+	}
+
+	// Add webseed to each specified torrent
+	for _, torrentID := range torrentIDs {
+		if err := m.manager.AddWebSeed(torrentID, req.URL, seedType); err != nil {
+			return &RPCError{
+				Code:    ErrCodeInvalidArgument,
+				Message: fmt.Sprintf("failed to add webseed for torrent %d: %v", torrentID, err),
+			}
+		}
+	}
+
+	return nil
+}
+
+// TorrentWebSeedRemove implements the torrent-webseed-remove RPC method
+func (m *RPCMethods) TorrentWebSeedRemove(req TorrentWebSeedRemoveRequest) error {
+	if req.URL == "" {
+		return &RPCError{
+			Code:    ErrCodeInvalidArgument,
+			Message: "webseed URL is required",
+		}
+	}
+
+	// If no IDs specified, apply to all torrents
+	torrentIDs := req.IDs
+	if len(torrentIDs) == 0 {
+		torrents := m.manager.GetAllTorrents()
+		for _, torrent := range torrents {
+			torrentIDs = append(torrentIDs, torrent.ID)
+		}
+	}
+
+	// Remove webseed from each specified torrent
+	for _, torrentID := range torrentIDs {
+		m.manager.RemoveWebSeed(torrentID, req.URL)
+	}
+
+	return nil
+}
+
+// TorrentWebSeedGet implements the torrent-webseed-get RPC method
+func (m *RPCMethods) TorrentWebSeedGet(req TorrentWebSeedGetRequest) (TorrentWebSeedGetResponse, error) {
+	var torrents []TorrentWebSeeds
+
+	// If no IDs specified, get webseeds for all torrents
+	torrentIDs := req.IDs
+	if len(torrentIDs) == 0 {
+		allTorrents := m.manager.GetAllTorrents()
+		for _, torrent := range allTorrents {
+			torrentIDs = append(torrentIDs, torrent.ID)
+		}
+	}
+
+	// Get webseeds for each torrent
+	for _, torrentID := range torrentIDs {
+		webseeds := m.manager.GetWebSeeds(torrentID)
+
+		var webseedInfos []WebSeedInfo
+		for _, ws := range webseeds {
+			webseedInfos = append(webseedInfos, WebSeedInfo{
+				URL:        ws.URL,
+				Type:       string(ws.Type),
+				Active:     ws.Active,
+				Failed:     ws.Failed,
+				FailCount:  ws.FailCount,
+				LastError:  ws.LastError,
+				Downloaded: ws.Downloaded,
+				Speed:      ws.Speed,
+			})
+		}
+
+		torrents = append(torrents, TorrentWebSeeds{
+			ID:       torrentID,
+			WebSeeds: webseedInfos,
+		})
+	}
+
+	return TorrentWebSeedGetResponse{Torrents: torrents}, nil
+}
+
 // SessionGet implements the session-get RPC method
 func (m *RPCMethods) SessionGet() (SessionGetResponse, error) {
 	config := m.manager.GetSessionConfig()
@@ -1440,6 +1610,14 @@ func (m *RPCMethods) getSpecialRequestHandler(method string) func(json.RawMessag
 		return m.createTorrentAddWrapper()
 	case "torrent-get":
 		return m.createTorrentGetWrapper()
+	case "torrent-magnet":
+		return m.createTorrentMagnetWrapper()
+	case "torrent-webseed-add":
+		return m.createTorrentWebSeedAddWrapper()
+	case "torrent-webseed-remove":
+		return m.createTorrentWebSeedRemoveWrapper()
+	case "torrent-webseed-get":
+		return m.createTorrentWebSeedGetWrapper()
 	case "session-set":
 		return m.createSessionSetWrapper()
 	default:
@@ -1485,6 +1663,17 @@ func (m *RPCMethods) createTorrentAddWrapper() func(json.RawMessage) (interface{
 	}
 }
 
+// createTorrentMagnetWrapper creates a wrapper function for the torrent-magnet method.
+func (m *RPCMethods) createTorrentMagnetWrapper() func(json.RawMessage) (interface{}, error) {
+	return func(params json.RawMessage) (interface{}, error) {
+		var req TorrentMagnetRequest
+		if err := json.Unmarshal(params, &req); err != nil {
+			return nil, &RPCError{Code: ErrCodeInvalidParams, Message: err.Error()}
+		}
+		return m.TorrentMagnet(req)
+	}
+}
+
 // createTorrentGetWrapper creates a wrapper function for the torrent-get method.
 func (m *RPCMethods) createTorrentGetWrapper() func(json.RawMessage) (interface{}, error) {
 	return func(params json.RawMessage) (interface{}, error) {
@@ -1507,6 +1696,41 @@ func (m *RPCMethods) createSessionSetWrapper() func(json.RawMessage) (interface{
 	}
 }
 
+// WebSeed wrapper functions
+
+// createTorrentWebSeedAddWrapper creates a wrapper function for the torrent-webseed-add method.
+func (m *RPCMethods) createTorrentWebSeedAddWrapper() func(json.RawMessage) (interface{}, error) {
+	return func(params json.RawMessage) (interface{}, error) {
+		var req TorrentWebSeedAddRequest
+		if err := json.Unmarshal(params, &req); err != nil {
+			return nil, &RPCError{Code: ErrCodeInvalidParams, Message: err.Error()}
+		}
+		return nil, m.TorrentWebSeedAdd(req)
+	}
+}
+
+// createTorrentWebSeedRemoveWrapper creates a wrapper function for the torrent-webseed-remove method.
+func (m *RPCMethods) createTorrentWebSeedRemoveWrapper() func(json.RawMessage) (interface{}, error) {
+	return func(params json.RawMessage) (interface{}, error) {
+		var req TorrentWebSeedRemoveRequest
+		if err := json.Unmarshal(params, &req); err != nil {
+			return nil, &RPCError{Code: ErrCodeInvalidParams, Message: err.Error()}
+		}
+		return nil, m.TorrentWebSeedRemove(req)
+	}
+}
+
+// createTorrentWebSeedGetWrapper creates a wrapper function for the torrent-webseed-get method.
+func (m *RPCMethods) createTorrentWebSeedGetWrapper() func(json.RawMessage) (interface{}, error) {
+	return func(params json.RawMessage) (interface{}, error) {
+		var req TorrentWebSeedGetRequest
+		if err := json.Unmarshal(params, &req); err != nil {
+			return nil, &RPCError{Code: ErrCodeInvalidParams, Message: err.Error()}
+		}
+		return m.TorrentWebSeedGet(req)
+	}
+}
+
 // GetSupportedMethods returns a list of all supported RPC methods
 func (m *RPCMethods) GetSupportedMethods() []string {
 	return []string{
@@ -1518,6 +1742,10 @@ func (m *RPCMethods) GetSupportedMethods() []string {
 		"torrent-verify",
 		"torrent-remove",
 		"torrent-set",
+		"torrent-magnet",
+		"torrent-webseed-add",
+		"torrent-webseed-remove",
+		"torrent-webseed-get",
 		"session-get",
 		"session-set",
 		"session-stats",

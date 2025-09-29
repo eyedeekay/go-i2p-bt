@@ -499,11 +499,12 @@ type SessionConfiguration struct {
 	PeerLimitPerTorrent  int64  `json:"peer_limit_per_torrent"`
 
 	// Protocol settings
-	DHTEnabled bool   `json:"dht_enabled"`
-	PEXEnabled bool   `json:"pex_enabled"`
-	LPDEnabled bool   `json:"lpd_enabled"`
-	UTPEnabled bool   `json:"utp_enabled"`
-	Encryption string `json:"encryption"`
+	DHTEnabled      bool   `json:"dht_enabled"`
+	PEXEnabled      bool   `json:"pex_enabled"`
+	LPDEnabled      bool   `json:"lpd_enabled"`
+	UTPEnabled      bool   `json:"utp_enabled"`
+	WebSeedsEnabled bool   `json:"webseeds_enabled"`
+	Encryption      string `json:"encryption"`
 
 	// Speed limits
 	SpeedLimitDown        int64 `json:"speed_limit_down"`
@@ -581,4 +582,65 @@ func (t *Torrent) UnmarshalJSON(data []byte) error {
 	t.StartDate = time.Unix(aux.StartDate, 0)
 	t.DateCreated = time.Unix(aux.DateCreated, 0)
 	return nil
+}
+
+// TorrentMagnetRequest represents the arguments for torrent-magnet method
+type TorrentMagnetRequest struct {
+	IDs []int64 `json:"ids,omitempty"` // Torrent IDs to get magnet links for
+}
+
+// TorrentMagnetResponse represents the response for torrent-magnet method
+type TorrentMagnetResponse struct {
+	Magnets []TorrentMagnet `json:"magnets"`
+}
+
+// TorrentMagnet represents a torrent's magnet link information
+type TorrentMagnet struct {
+	ID         int64  `json:"id"`
+	Name       string `json:"name"`
+	HashString string `json:"hashString"`
+	MagnetLink string `json:"magnetLink"`
+}
+
+// WebSeed RPC Types
+
+// TorrentWebSeedAddRequest represents the request for torrent-webseed-add method
+type TorrentWebSeedAddRequest struct {
+	IDs  []int64 `json:"ids,omitempty"`  // Torrent IDs
+	URL  string  `json:"url"`            // WebSeed URL
+	Type string  `json:"type,omitempty"` // WebSeed type: "url-list" or "url-data"
+}
+
+// TorrentWebSeedRemoveRequest represents the request for torrent-webseed-remove method
+type TorrentWebSeedRemoveRequest struct {
+	IDs []int64 `json:"ids,omitempty"` // Torrent IDs
+	URL string  `json:"url"`           // WebSeed URL to remove
+}
+
+// TorrentWebSeedGetRequest represents the request for torrent-webseed-get method
+type TorrentWebSeedGetRequest struct {
+	IDs []int64 `json:"ids,omitempty"` // Torrent IDs
+}
+
+// TorrentWebSeedGetResponse represents the response for torrent-webseed-get method
+type TorrentWebSeedGetResponse struct {
+	Torrents []TorrentWebSeeds `json:"torrents"`
+}
+
+// TorrentWebSeeds represents a torrent's webseeds
+type TorrentWebSeeds struct {
+	ID       int64         `json:"id"`
+	WebSeeds []WebSeedInfo `json:"webseeds"`
+}
+
+// WebSeedInfo represents webseed information for RPC responses
+type WebSeedInfo struct {
+	URL        string `json:"url"`
+	Type       string `json:"type"`
+	Active     bool   `json:"active"`
+	Failed     bool   `json:"failed"`
+	FailCount  int    `json:"fail_count"`
+	LastError  string `json:"last_error,omitempty"`
+	Downloaded int64  `json:"downloaded"`
+	Speed      int64  `json:"speed"`
 }
