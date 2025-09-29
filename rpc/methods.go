@@ -324,6 +324,24 @@ func (m *RPCMethods) TorrentSet(req TorrentActionRequest) error {
 // Returns:
 //   - error: validation error message or nil if valid
 func (m *RPCMethods) validateTorrentSetRequest(req TorrentActionRequest) error {
+	if err := m.validateNumericLimits(req); err != nil {
+		return err
+	}
+
+	if err := m.validateModeSettings(req); err != nil {
+		return err
+	}
+
+	if err := m.validatePriorityAndSpecialSettings(req); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// validateNumericLimits validates all numeric limit parameters in the torrent set request.
+// Ensures peer limits and seeding limits are non-negative values as required by the protocol.
+func (m *RPCMethods) validateNumericLimits(req TorrentActionRequest) error {
 	// Validate peer limit (must be non-negative)
 	if req.PeerLimit < 0 {
 		return fmt.Errorf("peer-limit must be non-negative, got %d", req.PeerLimit)
@@ -339,6 +357,12 @@ func (m *RPCMethods) validateTorrentSetRequest(req TorrentActionRequest) error {
 		return fmt.Errorf("seedIdleLimit must be non-negative, got %d", req.SeedIdleLimit)
 	}
 
+	return nil
+}
+
+// validateModeSettings validates mode configuration parameters according to Transmission specification.
+// Ensures seeding modes are within valid ranges (0=global, 1=single, 2=unlimited).
+func (m *RPCMethods) validateModeSettings(req TorrentActionRequest) error {
 	// Validate seed ratio mode (0=global, 1=single, 2=unlimited per Transmission spec)
 	if req.SeedRatioMode < 0 || req.SeedRatioMode > 2 {
 		return fmt.Errorf("seedRatioMode must be 0, 1, or 2, got %d", req.SeedRatioMode)
@@ -349,6 +373,12 @@ func (m *RPCMethods) validateTorrentSetRequest(req TorrentActionRequest) error {
 		return fmt.Errorf("seedIdleMode must be 0, 1, or 2, got %d", req.SeedIdleMode)
 	}
 
+	return nil
+}
+
+// validatePriorityAndSpecialSettings validates bandwidth priority and special configuration parameters.
+// Ensures bandwidth priority is within valid range and tracker replacement format is correct.
+func (m *RPCMethods) validatePriorityAndSpecialSettings(req TorrentActionRequest) error {
 	// Validate bandwidth priority (-1=low, 0=normal, 1=high per Transmission spec)
 	if req.BandwidthPriority < -1 || req.BandwidthPriority > 1 {
 		return fmt.Errorf("bandwidthPriority must be -1, 0, or 1, got %d", req.BandwidthPriority)
