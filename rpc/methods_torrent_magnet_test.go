@@ -209,6 +209,162 @@ func TestGenerateMagnetLink(t *testing.T) {
 	})
 }
 
+func TestTorrentMagnet_WithWebSeeds(t *testing.T) {
+	// Create a test torrent manager
+	manager := createTestTorrentManager(t)
+	methods := NewRPCMethods(manager)
+
+	// Create test torrent data
+	testHash := metainfo.Hash{0xab, 0xcd, 0xef, 0x12, 0x34, 0x56, 0x78, 0x90, 0xab, 0xcd, 0xef, 0x12, 0x34, 0x56, 0x78, 0x90, 0xab, 0xcd, 0xef, 0x12}
+
+	// Create test metainfo with URLList (WebSeeds)
+	testMetaInfo := &metainfo.MetaInfo{
+		Announce: "http://tracker.example.com/announce",
+		URLList:  metainfo.URLList{"http://webseed1.example.com/", "http://webseed2.example.com/"},
+	}
+	testMetaInfo.InfoBytes = []byte(`d4:name12:Test Torrente`)
+
+	testTorrent := &TorrentState{
+		ID:       1,
+		InfoHash: testHash,
+		Status:   TorrentStatusDownloading,
+		MetaInfo: testMetaInfo,
+	}
+
+	// Add the torrent to the manager
+	manager.mu.Lock()
+	manager.torrents[1] = testTorrent
+	manager.mu.Unlock()
+
+	// Add WebSeeds to the torrent
+	err := manager.AddWebSeed(1, "http://webseed3.example.com/", WebSeedTypeHTTPFTP)
+	if err != nil {
+		t.Fatalf("Failed to add WebSeed: %v", err)
+	}
+	err = manager.AddWebSeed(1, "http://webseed4.example.com/", WebSeedTypeHTTPFTP)
+	if err != nil {
+		t.Fatalf("Failed to add WebSeed: %v", err)
+	}
+
+	t.Run("MagnetWithWebSeeds", func(t *testing.T) {
+		req := TorrentMagnetRequest{IDs: []int64{1}}
+		resp, err := methods.TorrentMagnet(req)
+		if err != nil {
+			t.Fatalf("TorrentMagnet failed: %v", err)
+		}
+
+		if len(resp.Magnets) != 1 {
+			t.Fatalf("Expected 1 magnet, got %d", len(resp.Magnets))
+		}
+
+		magnet := resp.Magnets[0]
+		magnetLink := magnet.MagnetLink
+
+		// Should contain WebSeeds from MetaInfo URLList
+		if !contains(magnetLink, "ws=http%3A%2F%2Fwebseed1.example.com%2F") {
+			t.Errorf("Magnet link should contain WebSeed from URLList: %s", magnetLink)
+		}
+		if !contains(magnetLink, "ws=http%3A%2F%2Fwebseed2.example.com%2F") {
+			t.Errorf("Magnet link should contain WebSeed from URLList: %s", magnetLink)
+		}
+
+		// Should contain WebSeeds from TorrentManager
+		if !contains(magnetLink, "ws=http%3A%2F%2Fwebseed3.example.com%2F") {
+			t.Errorf("Magnet link should contain WebSeed from manager: %s", magnetLink)
+		}
+		if !contains(magnetLink, "ws=http%3A%2F%2Fwebseed4.example.com%2F") {
+			t.Errorf("Magnet link should contain WebSeed from manager: %s", magnetLink)
+		}
+
+		// Should still contain basic magnet components
+		if !contains(magnetLink, "xt=urn:btih:") {
+			t.Errorf("Magnet link should contain info hash: %s", magnetLink)
+		}
+		if !contains(magnetLink, "dn=Test+Torrent") {
+			t.Errorf("Magnet link should contain display name: %s", magnetLink)
+		}
+	})
+
+	t.Run("MagnetWithFailedWebSeeds", func(t *testing.T) {
+		// Add a failed WebSeed
+		err := manager.AddWebSeed(1, "http://failed-webseed.example.com/", WebSeedTypeHTTPFTP)
+		if err != nil {
+			t.Fatalf("Failed to add WebSeed: %v", err)
+		}
+
+		// Mark the WebSeed as failed by accessing the manager directly
+		manager.webseedManager.mu.Lock()
+		if seeds, exists := manager.webseedManager.webSeeds["1"]; exists {
+			for _, ws := range seeds {
+				if ws.URL == "http://failed-webseed.example.com/" {
+					ws.Failed = true
+					ws.Active = false
+					break
+				}
+			}
+		}
+		manager.webseedManager.mu.Unlock()
+
+		req := TorrentMagnetRequest{IDs: []int64{1}}
+		resp, err := methods.TorrentMagnet(req)
+		if err != nil {
+			t.Fatalf("TorrentMagnet failed: %v", err)
+		}
+
+		magnet := resp.Magnets[0]
+		magnetLink := magnet.MagnetLink
+
+		// Should not contain failed WebSeed
+		if contains(magnetLink, "ws=http%3A%2F%2Ffailed-webseed.example.com%2F") {
+			t.Errorf("Magnet link should not contain failed WebSeed: %s", magnetLink)
+		}
+
+		// Should still contain active WebSeeds
+		if !contains(magnetLink, "ws=http%3A%2F%2Fwebseed3.example.com%2F") {
+			t.Errorf("Magnet link should still contain active WebSeeds: %s", magnetLink)
+		}
+	})
+
+	t.Run("MagnetFallbackWithWebSeeds", func(t *testing.T) {
+		// Create torrent without MetaInfo to test fallback
+		testTorrentFallback := &TorrentState{
+			ID:       2,
+			InfoHash: testHash,
+			Status:   TorrentStatusDownloading,
+			MetaInfo: nil, // No MetaInfo to force fallback
+		}
+
+		manager.mu.Lock()
+		manager.torrents[2] = testTorrentFallback
+		manager.mu.Unlock()
+
+		// Add WebSeeds to the fallback torrent
+		err := manager.AddWebSeed(2, "http://fallback-webseed.example.com/", WebSeedTypeHTTPFTP)
+		if err != nil {
+			t.Fatalf("Failed to add WebSeed: %v", err)
+		}
+
+		req := TorrentMagnetRequest{IDs: []int64{2}}
+		resp, err := methods.TorrentMagnet(req)
+		if err != nil {
+			t.Fatalf("TorrentMagnet failed: %v", err)
+		}
+
+		magnet := resp.Magnets[0]
+		magnetLink := magnet.MagnetLink
+
+		// Should contain WebSeed even in fallback mode
+		if !contains(magnetLink, "ws=http%3A%2F%2Ffallback-webseed.example.com%2F") {
+			t.Errorf("Fallback magnet link should contain WebSeed: %s", magnetLink)
+		}
+
+		// Should contain basic magnet components
+		if !contains(magnetLink, "xt=urn:btih:") {
+			t.Errorf("Fallback magnet link should contain info hash: %s", magnetLink)
+		}
+	})
+}
+
 // Helper function to check if a string contains a substring
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(s) > len(substr) &&

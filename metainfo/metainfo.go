@@ -149,6 +149,11 @@ func (mi MetaInfo) Magnet(displayName string, infoHash Hash) (m Magnet) {
 		m.Trackers = append(m.Trackers, t)
 	}
 
+	// Add WebSeeds from URLList (BEP-19)
+	for _, ws := range mi.URLList {
+		m.WebSeeds = append(m.WebSeeds, ws)
+	}
+
 	if displayName == "" {
 		info, _ := mi.Info()
 		displayName = info.Name

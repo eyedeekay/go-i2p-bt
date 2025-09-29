@@ -17,6 +17,7 @@ type Magnet struct {
 	InfoHash    Hash       // From "xt"
 	Trackers    []string   // From "tr"
 	DisplayName string     // From "dn" if not empty
+	WebSeeds    []string   // From "ws" - WebSeed URLs (BEP-19)
 	Params      url.Values // All other values, such as "as", "xs", etc
 }
 
@@ -42,13 +43,16 @@ func (m Magnet) Peers() (peers []HostAddress, err error) {
 }
 
 func (m Magnet) String() string {
-	vs := make(url.Values, len(m.Params)+len(m.Trackers)+2)
+	vs := make(url.Values, len(m.Params)+len(m.Trackers)+len(m.WebSeeds)+2)
 	for k, v := range m.Params {
 		vs[k] = append([]string(nil), v...)
 	}
 
 	for _, tr := range m.Trackers {
 		vs.Add("tr", tr)
+	}
+	for _, ws := range m.WebSeeds {
+		vs.Add("ws", ws)
 	}
 	if m.DisplayName != "" {
 		vs.Add("dn", m.DisplayName)
@@ -91,6 +95,9 @@ func ParseMagnetURI(uri string) (m Magnet, err error) {
 
 	m.Trackers = q["tr"]
 	delete(q, "tr")
+
+	m.WebSeeds = q["ws"]
+	delete(q, "ws")
 
 	if len(q) == 0 {
 		q = nil

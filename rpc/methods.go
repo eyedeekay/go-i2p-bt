@@ -17,6 +17,7 @@ package rpc
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -913,19 +914,38 @@ func (m *RPCMethods) TorrentMagnet(req TorrentMagnetRequest) (TorrentMagnetRespo
 func (m *RPCMethods) generateMagnetLink(state *TorrentState) string {
 	if state.MetaInfo != nil {
 		magnet := state.MetaInfo.Magnet("", state.InfoHash)
+
+		// Add WebSeeds from the torrent manager
+		webSeeds := m.manager.GetWebSeeds(state.ID)
+		for _, ws := range webSeeds {
+			if ws.Active && !ws.Failed {
+				magnet.WebSeeds = append(magnet.WebSeeds, ws.URL)
+			}
+		}
+
 		return magnet.String()
 	}
 
-	// Fallback: create basic magnet link with info hash and name only
+	// Fallback: create enhanced magnet link with info hash, name, and webseeds
 	name := getName(state)
 	if name == "" {
 		name = state.InfoHash.HexString()
 	}
 
-	// Create basic magnet link
-	return fmt.Sprintf("magnet:?xt=urn:btih:%s&dn=%s",
+	// Start with basic magnet link
+	magnetURL := fmt.Sprintf("magnet:?xt=urn:btih:%s&dn=%s",
 		state.InfoHash.HexString(),
 		strings.ReplaceAll(name, " ", "%20"))
+
+	// Add WebSeeds from the torrent manager
+	webSeeds := m.manager.GetWebSeeds(state.ID)
+	for _, ws := range webSeeds {
+		if ws.Active && !ws.Failed {
+			magnetURL += fmt.Sprintf("&ws=%s", url.QueryEscape(ws.URL))
+		}
+	}
+
+	return magnetURL
 }
 
 // WebSeed RPC Methods
