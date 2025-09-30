@@ -395,11 +395,13 @@ func TestHookManager_ExecuteHooksWithPanic(t *testing.T) {
 func TestHookManager_ExecuteHooksWithContext(t *testing.T) {
 	hm := NewHookManager()
 
-	var receivedContext context.Context
+	// Use channel for proper synchronization between goroutines
+	contextReceived := make(chan context.Context, 1)
 	hook := &Hook{
 		ID: "context-hook",
 		Callback: func(ctx *HookContext) error {
-			receivedContext = ctx.Context
+			// Send the received context through channel instead of shared variable
+			contextReceived <- ctx.Context
 			return nil
 		},
 		Events: []HookEvent{HookEventTorrentAdded},
@@ -416,11 +418,14 @@ func TestHookManager_ExecuteHooksWithContext(t *testing.T) {
 	torrent := &TorrentState{ID: 1}
 	hm.ExecuteHooksWithContext(ctx, HookEventTorrentAdded, torrent, nil)
 
-	// Wait for async execution
-	time.Sleep(100 * time.Millisecond)
-
-	if receivedContext == nil {
-		t.Error("Hook did not receive context")
+	// Wait for hook execution with proper timeout and synchronization
+	select {
+	case receivedContext := <-contextReceived:
+		if receivedContext == nil {
+			t.Error("Hook received nil context")
+		}
+	case <-time.After(1 * time.Second):
+		t.Error("Hook execution timed out - did not receive context")
 	}
 }
 
@@ -582,11 +587,13 @@ func TestHookPriorityOrdering(t *testing.T) {
 func TestHookContext(t *testing.T) {
 	hm := NewHookManager()
 
-	var receivedContext *HookContext
+	// Use channel for proper synchronization between goroutines
+	contextReceived := make(chan *HookContext, 1)
 	hook := &Hook{
 		ID: "context-test",
 		Callback: func(ctx *HookContext) error {
-			receivedContext = ctx
+			// Send the received context through channel instead of shared variable
+			contextReceived <- ctx
 			return nil
 		},
 		Events: []HookEvent{HookEventTorrentAdded},
@@ -607,27 +614,30 @@ func TestHookContext(t *testing.T) {
 
 	hm.ExecuteHooks(HookEventTorrentAdded, torrent, data)
 
-	// Wait for async execution
-	time.Sleep(100 * time.Millisecond)
+	// Wait for hook execution with proper timeout and synchronization
+	select {
+	case receivedContext := <-contextReceived:
+		if receivedContext == nil {
+			t.Fatal("Hook received nil context")
+		}
 
-	if receivedContext == nil {
-		t.Fatal("Hook did not receive context")
-	}
+		if receivedContext.Event != HookEventTorrentAdded {
+			t.Errorf("Expected event %s, got %s", HookEventTorrentAdded, receivedContext.Event)
+		}
 
-	if receivedContext.Event != HookEventTorrentAdded {
-		t.Errorf("Expected event %s, got %s", HookEventTorrentAdded, receivedContext.Event)
-	}
+		if receivedContext.Torrent.ID != 123 {
+			t.Errorf("Expected torrent ID 123, got %d", receivedContext.Torrent.ID)
+		}
 
-	if receivedContext.Torrent.ID != 123 {
-		t.Errorf("Expected torrent ID 123, got %d", receivedContext.Torrent.ID)
-	}
+		if receivedContext.Data["test-key"] != "test-value" {
+			t.Errorf("Expected test-value, got %v", receivedContext.Data["test-key"])
+		}
 
-	if receivedContext.Data["test-key"] != "test-value" {
-		t.Errorf("Expected test-value, got %v", receivedContext.Data["test-key"])
-	}
-
-	if receivedContext.Timestamp.IsZero() {
-		t.Error("Expected non-zero timestamp")
+		if receivedContext.Timestamp.IsZero() {
+			t.Error("Expected non-zero timestamp")
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("Hook execution timed out - did not receive context")
 	}
 }
 
