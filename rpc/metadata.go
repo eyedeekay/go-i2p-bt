@@ -184,39 +184,61 @@ func (mm *MetadataManager) SetMetadata(request *MetadataRequest) *MetadataRespon
 	}
 
 	start := time.Now()
-
 	mm.mu.Lock()
-	defer func() {
-		mm.metrics.TotalOperations++
-		mm.metrics.AverageLatency = (mm.metrics.AverageLatency + time.Since(start)) / 2
-		mm.metrics.LastOperation = time.Now()
-		mm.mu.Unlock()
-	}()
+	defer mm.updateMetrics(start)
 
-	// Get or create torrent metadata
-	torrentMeta, exists := mm.metadata[request.TorrentID]
+	torrentMeta := mm.getOrCreateTorrentMetadata(request.TorrentID)
+
+	if response := mm.validateVersion(request, torrentMeta); response != nil {
+		return response
+	}
+
+	errors := make([]string, 0)
+	errors = append(errors, mm.processMetadataRemovals(request, torrentMeta)...)
+	errors = append(errors, mm.processMetadataUpdates(request, torrentMeta)...)
+
+	return mm.buildMetadataResponse(torrentMeta, errors)
+}
+
+// updateMetrics updates metadata manager metrics after an operation
+func (mm *MetadataManager) updateMetrics(start time.Time) {
+	mm.metrics.TotalOperations++
+	mm.metrics.AverageLatency = (mm.metrics.AverageLatency + time.Since(start)) / 2
+	mm.metrics.LastOperation = time.Now()
+	mm.mu.Unlock()
+}
+
+// getOrCreateTorrentMetadata retrieves existing or creates new torrent metadata
+func (mm *MetadataManager) getOrCreateTorrentMetadata(torrentID int64) *TorrentMetadata {
+	torrentMeta, exists := mm.metadata[torrentID]
 	if !exists {
 		torrentMeta = &TorrentMetadata{
-			TorrentID:    request.TorrentID,
+			TorrentID:    torrentID,
 			Metadata:     make(map[string]*MetadataValue),
 			Version:      0,
 			LastModified: time.Now(),
 		}
-		mm.metadata[request.TorrentID] = torrentMeta
+		mm.metadata[torrentID] = torrentMeta
 		mm.metrics.TotalTorrents++
 	}
+	return torrentMeta
+}
 
-	// Check version for optimistic locking
+// validateVersion checks version for optimistic locking
+func (mm *MetadataManager) validateVersion(request *MetadataRequest, torrentMeta *TorrentMetadata) *MetadataResponse {
 	if request.ExpectedVersion > 0 && torrentMeta.Version != request.ExpectedVersion {
 		return &MetadataResponse{
 			Success: false,
 			Errors:  []string{fmt.Sprintf("version mismatch: expected %d, got %d", request.ExpectedVersion, torrentMeta.Version)},
 		}
 	}
+	return nil
+}
 
-	errors := make([]string, 0)
+// processMetadataRemovals processes metadata removal requests
+func (mm *MetadataManager) processMetadataRemovals(request *MetadataRequest, torrentMeta *TorrentMetadata) []string {
+	var errors []string
 
-	// Process removals first
 	for _, key := range request.Remove {
 		if err := mm.validateKeyForRemoval(key); err != nil {
 			errors = append(errors, fmt.Sprintf("remove key '%s': %v", key, err))
@@ -227,14 +249,19 @@ func (mm *MetadataManager) SetMetadata(request *MetadataRequest) *MetadataRespon
 			delete(torrentMeta.Metadata, key)
 			mm.metrics.TotalKeys--
 
-			// Trigger callback
 			if mm.onMetadataRemoved != nil {
 				mm.onMetadataRemoved(request.TorrentID, key, oldValue)
 			}
 		}
 	}
 
-	// Process set operations
+	return errors
+}
+
+// processMetadataUpdates processes metadata set operations
+func (mm *MetadataManager) processMetadataUpdates(request *MetadataRequest, torrentMeta *TorrentMetadata) []string {
+	var errors []string
+
 	for key, value := range request.Set {
 		if err := mm.validateMetadata(key, value, torrentMeta); err != nil {
 			errors = append(errors, fmt.Sprintf("set key '%s': %v", key, err))
@@ -243,31 +270,41 @@ func (mm *MetadataManager) SetMetadata(request *MetadataRequest) *MetadataRespon
 		}
 
 		oldValue := torrentMeta.Metadata[key]
-		newValue := &MetadataValue{
-			Value:     value,
-			Type:      mm.getValueType(value),
-			CreatedAt: time.Now(),
-			UpdatedAt: time.Now(),
-			Source:    request.Source,
-			Tags:      request.Tags,
-		}
+		newValue := mm.createMetadataValue(value, request.Source, request.Tags, oldValue)
+		torrentMeta.Metadata[key] = newValue
 
-		// If updating existing value, preserve creation time
-		if oldValue != nil {
-			newValue.CreatedAt = oldValue.CreatedAt
-		} else {
+		if oldValue == nil {
 			mm.metrics.TotalKeys++
 		}
 
-		torrentMeta.Metadata[key] = newValue
-
-		// Trigger callback
 		if mm.onMetadataChanged != nil {
 			mm.onMetadataChanged(request.TorrentID, key, oldValue, newValue)
 		}
 	}
 
-	// Update version and modification time
+	return errors
+}
+
+// createMetadataValue creates a new MetadataValue preserving creation time if updating
+func (mm *MetadataManager) createMetadataValue(value interface{}, source string, tags []string, oldValue *MetadataValue) *MetadataValue {
+	newValue := &MetadataValue{
+		Value:     value,
+		Type:      mm.getValueType(value),
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+		Source:    source,
+		Tags:      tags,
+	}
+
+	if oldValue != nil {
+		newValue.CreatedAt = oldValue.CreatedAt
+	}
+
+	return newValue
+}
+
+// buildMetadataResponse creates the final response with version updates
+func (mm *MetadataManager) buildMetadataResponse(torrentMeta *TorrentMetadata, errors []string) *MetadataResponse {
 	torrentMeta.Version++
 	torrentMeta.LastModified = time.Now()
 
