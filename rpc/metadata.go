@@ -391,6 +391,23 @@ func (mm *MetadataManager) GetMetrics() MetadataMetrics {
 
 // validateMetadata validates a metadata key-value pair
 func (mm *MetadataManager) validateMetadata(key string, value interface{}, torrentMeta *TorrentMetadata) error {
+	if err := mm.validateKey(key, torrentMeta); err != nil {
+		return err
+	}
+
+	if err := mm.validateValueType(value); err != nil {
+		return err
+	}
+
+	if err := mm.validateValueSerialization(value); err != nil {
+		return err
+	}
+
+	return mm.validateTorrentCapacity(key, torrentMeta)
+}
+
+// validateKey validates the metadata key constraints
+func (mm *MetadataManager) validateKey(key string, torrentMeta *TorrentMetadata) error {
 	// Validate key length
 	if len(key) > mm.constraints.MaxKeyLength {
 		return fmt.Errorf("key length %d exceeds maximum %d", len(key), mm.constraints.MaxKeyLength)
@@ -410,13 +427,20 @@ func (mm *MetadataManager) validateMetadata(key string, value interface{}, torre
 		}
 	}
 
-	// Validate value type
+	return nil
+}
+
+// validateValueType validates the value type is allowed
+func (mm *MetadataManager) validateValueType(value interface{}) error {
 	valueType := mm.getValueType(value)
 	if !mm.isAllowedType(valueType) {
 		return fmt.Errorf("type '%s' is not allowed", valueType)
 	}
+	return nil
+}
 
-	// Validate serialized size
+// validateValueSerialization validates the value can be serialized and meets size constraints
+func (mm *MetadataManager) validateValueSerialization(value interface{}) error {
 	serialized, err := json.Marshal(value)
 	if err != nil {
 		return fmt.Errorf("value is not serializable: %w", err)
@@ -424,14 +448,16 @@ func (mm *MetadataManager) validateMetadata(key string, value interface{}, torre
 	if len(serialized) > mm.constraints.MaxValueSize {
 		return fmt.Errorf("serialized value size %d exceeds maximum %d", len(serialized), mm.constraints.MaxValueSize)
 	}
+	return nil
+}
 
-	// Check max keys per torrent
+// validateTorrentCapacity validates the torrent doesn't exceed maximum key count
+func (mm *MetadataManager) validateTorrentCapacity(key string, torrentMeta *TorrentMetadata) error {
 	if _, exists := torrentMeta.Metadata[key]; !exists {
 		if len(torrentMeta.Metadata) >= mm.constraints.MaxKeysPerTorrent {
 			return fmt.Errorf("torrent already has maximum number of metadata keys (%d)", mm.constraints.MaxKeysPerTorrent)
 		}
 	}
-
 	return nil
 }
 
