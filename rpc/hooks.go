@@ -252,6 +252,9 @@ func (hm *HookManager) executeHooksWithContext(hookCtx *HookContext) {
 		hooksToExecute = append(hooksToExecute, eventHooks...)
 	}
 
+	// Sort all hooks by priority to ensure correct execution order
+	hm.sortHooksByPriority(hooksToExecute)
+
 	hm.mu.RUnlock()
 
 	if len(hooksToExecute) == 0 {
