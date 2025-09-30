@@ -53,6 +53,34 @@ const (
 	EventSystemError    EventType = "system.error"
 )
 
+// getAllEventTypes returns all defined event types for global subscriber registration
+func getAllEventTypes() []EventType {
+	return []EventType{
+		// Torrent lifecycle events
+		EventTorrentAdded,
+		EventTorrentStarted,
+		EventTorrentStopped,
+		EventTorrentCompleted,
+		EventTorrentRemoved,
+		EventTorrentError,
+		EventTorrentMetadata,
+		// Session events
+		EventSessionStarted,
+		EventSessionStopped,
+		EventSessionConfigChanged,
+		// Peer events
+		EventPeerConnected,
+		EventPeerDisconnected,
+		// Download events
+		EventDownloadStarted,
+		EventDownloadPaused,
+		EventDownloadFinished,
+		// System events
+		EventSystemShutdown,
+		EventSystemError,
+	}
+}
+
 // Event represents a notification event with metadata
 type Event struct {
 	// Type of the event
@@ -219,8 +247,12 @@ func (ens *EventNotificationSystem) Subscribe(subscriber EventSubscriber) error 
 	// Register in type-based lookup for efficient routing
 	filters := subscriber.GetSubscriptionFilters()
 	if len(filters) == 0 {
-		// Subscribe to all event types
-		for eventType := range ens.typeSubscribers {
+		// Subscribe to all event types (global subscriber)
+		allEventTypes := getAllEventTypes()
+		for _, eventType := range allEventTypes {
+			if ens.typeSubscribers[eventType] == nil {
+				ens.typeSubscribers[eventType] = make([]string, 0)
+			}
 			ens.typeSubscribers[eventType] = append(ens.typeSubscribers[eventType], id)
 		}
 	} else {
