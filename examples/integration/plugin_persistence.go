@@ -386,7 +386,7 @@ func demonstratePersistencePlugin() {
 	fmt.Println("=== Plugin-Based Persistence Integration Example ===")
 
 	pluginManager, metadataManager, persistencePlugin, tempDir := setupPluginEnvironment()
-	
+
 	torrent := createSampleTorrent()
 	params := map[string]interface{}{"source": "user_add"}
 	ctx := context.Background()
