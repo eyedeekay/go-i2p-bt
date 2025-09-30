@@ -484,41 +484,67 @@ func (pm *PluginManager) registerTypedPlugin(plugin Plugin) {
 func (pm *PluginManager) unregisterTypedPlugin(plugin Plugin) {
 	pluginID := plugin.ID()
 
-	// Remove from behavior plugins
-	if behaviorPlugin, ok := plugin.(BehaviorPlugin); ok {
-		for _, operation := range behaviorPlugin.SupportedOperations() {
-			plugins := pm.behaviorPlugins[operation]
-			for i, p := range plugins {
-				if p.ID() == pluginID {
-					pm.behaviorPlugins[operation] = append(plugins[:i], plugins[i+1:]...)
-					break
-				}
-			}
-		}
+	pm.removeBehaviorPlugin(plugin, pluginID)
+	pm.removeInterceptorPlugin(plugin, pluginID)
+	pm.removeMetricsPlugin(plugin, pluginID)
+}
+
+// removeBehaviorPlugin removes a plugin from behavior plugin registries
+func (pm *PluginManager) removeBehaviorPlugin(plugin Plugin, pluginID string) {
+	behaviorPlugin, ok := plugin.(BehaviorPlugin)
+	if !ok {
+		return
 	}
 
-	// Remove from interceptor plugins
-	if interceptorPlugin, ok := plugin.(InterceptorPlugin); ok {
-		for _, method := range interceptorPlugin.SupportedMethods() {
-			plugins := pm.interceptorPlugins[method]
-			for i, p := range plugins {
-				if p.ID() == pluginID {
-					pm.interceptorPlugins[method] = append(plugins[:i], plugins[i+1:]...)
-					break
-				}
-			}
-		}
+	for _, operation := range behaviorPlugin.SupportedOperations() {
+		pm.behaviorPlugins[operation] = pm.removeBehaviorPluginFromSlice(pm.behaviorPlugins[operation], pluginID)
+	}
+}
+
+// removeInterceptorPlugin removes a plugin from interceptor plugin registries
+func (pm *PluginManager) removeInterceptorPlugin(plugin Plugin, pluginID string) {
+	interceptorPlugin, ok := plugin.(InterceptorPlugin)
+	if !ok {
+		return
 	}
 
-	// Remove from metrics plugins
-	if _, ok := plugin.(MetricsPlugin); ok {
-		for i, p := range pm.metricsPlugins {
-			if p.ID() == pluginID {
-				pm.metricsPlugins = append(pm.metricsPlugins[:i], pm.metricsPlugins[i+1:]...)
-				break
-			}
+	for _, method := range interceptorPlugin.SupportedMethods() {
+		pm.interceptorPlugins[method] = pm.removeInterceptorPluginFromSlice(pm.interceptorPlugins[method], pluginID)
+	}
+}
+
+// removeMetricsPlugin removes a plugin from metrics plugin registry
+func (pm *PluginManager) removeMetricsPlugin(plugin Plugin, pluginID string) {
+	if _, ok := plugin.(MetricsPlugin); !ok {
+		return
+	}
+
+	for i, p := range pm.metricsPlugins {
+		if p.ID() == pluginID {
+			pm.metricsPlugins = append(pm.metricsPlugins[:i], pm.metricsPlugins[i+1:]...)
+			break
 		}
 	}
+}
+
+// removeBehaviorPluginFromSlice removes a behavior plugin with matching ID from a slice
+func (pm *PluginManager) removeBehaviorPluginFromSlice(plugins []BehaviorPlugin, pluginID string) []BehaviorPlugin {
+	for i, p := range plugins {
+		if p.ID() == pluginID {
+			return append(plugins[:i], plugins[i+1:]...)
+		}
+	}
+	return plugins
+}
+
+// removeInterceptorPluginFromSlice removes an interceptor plugin with matching ID from a slice
+func (pm *PluginManager) removeInterceptorPluginFromSlice(plugins []InterceptorPlugin, pluginID string) []InterceptorPlugin {
+	for i, p := range plugins {
+		if p.ID() == pluginID {
+			return append(plugins[:i], plugins[i+1:]...)
+		}
+	}
+	return plugins
 }
 
 // ListPluginsByType returns plugin IDs grouped by type
