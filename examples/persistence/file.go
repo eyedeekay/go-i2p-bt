@@ -396,12 +396,12 @@ func (fp *FilePersistence) loadTorrentFile(filename string) (*rpc.TorrentState, 
 	if err := json.Unmarshal(data, &dataMap); err != nil {
 		return nil, err
 	}
-	
+
 	// Convert info_hash from string to Hash
 	if hashStr, ok := dataMap["info_hash"].(string); ok {
 		dataMap["info_hash"] = metainfo.NewHashFromString(hashStr)
 	}
-	
+
 	// Re-marshal and unmarshal into TorrentState
 	fixedData, err := json.Marshal(dataMap)
 	if err != nil {
