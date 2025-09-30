@@ -283,8 +283,8 @@ func TestMetadataConstraints(t *testing.T) {
 		MaxValueSize:      100,
 		MaxKeysPerTorrent: 2,
 		AllowedTypes:      []string{"string"},
-		RequiredKeys:      []string{"required_key"},
-		ReadOnlyKeys:      []string{"readonly_key"},
+		RequiredKeys:      []string{"req_key"},
+		ReadOnlyKeys:      []string{"ro_key"},
 	}
 	mm.SetConstraints(constraints)
 
@@ -296,7 +296,7 @@ func TestMetadataConstraints(t *testing.T) {
 	}
 
 	// Test max keys limit
-	request = createTestMetadataRequest(1, map[string]interface{}{
+	request = createTestMetadataRequest(2, map[string]interface{}{
 		"key1": "value1",
 		"key2": "value2",
 		"key3": "value3", // This should fail due to limit of 2
@@ -306,26 +306,26 @@ func TestMetadataConstraints(t *testing.T) {
 		t.Error("SetMetadata should fail when exceeding max keys limit")
 	}
 
-	// Test read-only key modification
+	// Test read-only key modification (use different torrent ID)
 	// First set the read-only key
-	request = createSimpleSetRequest(1, "readonly_key", "initial")
+	request = createSimpleSetRequest(3, "ro_key", "initial")
 	response = mm.SetMetadata(request)
 	if !response.Success {
 		t.Fatalf("Initial SetMetadata failed: %v", response.Errors)
 	}
 
 	// Try to modify it
-	request = createSimpleSetRequest(1, "readonly_key", "modified")
+	request = createSimpleSetRequest(3, "ro_key", "modified")
 	response = mm.SetMetadata(request)
 	if response.Success {
 		t.Error("SetMetadata should fail when modifying read-only key")
 	}
 
-	// Test removing required key
-	request = createSimpleSetRequest(1, "required_key", "value")
+	// Test removing required key (use different torrent ID)
+	request = createSimpleSetRequest(4, "req_key", "value")
 	mm.SetMetadata(request) // Set it first
 
-	request = createSimpleRemoveRequest(1, "required_key")
+	request = createSimpleRemoveRequest(4, "req_key")
 	response = mm.SetMetadata(request)
 	if response.Success {
 		t.Error("SetMetadata should fail when removing required key")
