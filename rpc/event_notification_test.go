@@ -195,7 +195,6 @@ func TestSubscribeAndUnsubscribe(t *testing.T) {
 	// Test successful subscription
 	subscriber := createTestSubscriber("test-subscriber", []EventType{EventTorrentAdded, EventTorrentStarted})
 	err := ens.Subscribe(subscriber)
-
 	if err != nil {
 		t.Fatalf("Subscribe failed: %v", err)
 	}

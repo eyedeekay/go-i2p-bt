@@ -272,7 +272,6 @@ func TestRegisterPlugin(t *testing.T) {
 	// Test successful registration
 	plugin := createTestBasicPlugin("test-plugin", "Test Plugin", "1.0.0")
 	err := pm.RegisterPlugin(plugin, map[string]interface{}{"key": "value"})
-
 	if err != nil {
 		t.Fatalf("RegisterPlugin failed: %v", err)
 	}
