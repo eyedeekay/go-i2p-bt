@@ -423,13 +423,33 @@ func (me *MetadataExtensions) GetTorrentsWithCustomFlag(flagName string) []int64
 
 // Report Generation
 
+// GenerateMetadataReport creates a comprehensive metadata report for all torrents.
+// This method coordinates the collection and formatting of various statistics
+// into a human-readable report format.
 func (me *MetadataExtensions) GenerateMetadataReport() string {
 	torrentIDs := me.getAllTorrentIDs()
 
 	report := "=== Advanced Metadata Report ===\n\n"
 	report += fmt.Sprintf("Total Torrents: %d\n\n", len(torrentIDs))
 
-	// Category statistics
+	// Collect category and tag statistics
+	categoryStats, tagStats := me.collectCategoryStatistics(torrentIDs)
+	report += me.formatCategoryReport(categoryStats, tagStats)
+
+	// Collect quality statistics
+	qualityStats := me.collectQualityStatistics(torrentIDs)
+	report += me.formatQualityReport(qualityStats)
+
+	// Collect download status statistics
+	statusStats := me.collectDownloadStatusStatistics(torrentIDs)
+	report += me.formatDownloadStatusReport(statusStats)
+
+	return report
+}
+
+// collectCategoryStatistics gathers category and tag distribution data from all torrents.
+// Returns separate maps for category counts and tag counts.
+func (me *MetadataExtensions) collectCategoryStatistics(torrentIDs []int64) (map[string]int, map[string]int) {
 	categoryStats := make(map[string]int)
 	tagStats := make(map[string]int)
 
@@ -451,7 +471,12 @@ func (me *MetadataExtensions) GenerateMetadataReport() string {
 		}
 	}
 
-	report += "Category Distribution:\n"
+	return categoryStats, tagStats
+}
+
+// formatCategoryReport formats category and tag statistics into a readable report section.
+func (me *MetadataExtensions) formatCategoryReport(categoryStats, tagStats map[string]int) string {
+	report := "Category Distribution:\n"
 	for category, count := range categoryStats {
 		report += fmt.Sprintf("  %s: %d\n", category, count)
 	}
@@ -463,7 +488,12 @@ func (me *MetadataExtensions) GenerateMetadataReport() string {
 	}
 	report += "\n"
 
-	// Quality statistics
+	return report
+}
+
+// collectQualityStatistics analyzes quality ratings across all torrents.
+// Categorizes torrents into quality tiers based on community ratings.
+func (me *MetadataExtensions) collectQualityStatistics(torrentIDs []int64) map[string]int {
 	qualityStats := map[string]int{
 		"high_quality":   0,
 		"medium_quality": 0,
@@ -491,39 +521,56 @@ func (me *MetadataExtensions) GenerateMetadataReport() string {
 		}
 	}
 
-	report += "Quality Distribution:\n"
+	return qualityStats
+}
+
+// formatQualityReport formats quality statistics into a readable report section.
+func (me *MetadataExtensions) formatQualityReport(qualityStats map[string]int) string {
+	report := "Quality Distribution:\n"
 	for quality, count := range qualityStats {
 		report += fmt.Sprintf("  %s: %d\n", quality, count)
 	}
 	report += "\n"
 
-	// Download completion statistics
-	completed := 0
-	inProgress := 0
-	errored := 0
+	return report
+}
+
+// collectDownloadStatusStatistics analyzes download completion status across all torrents.
+// Categorizes torrents by their current download state and error status.
+func (me *MetadataExtensions) collectDownloadStatusStatistics(torrentIDs []int64) map[string]int {
+	statusStats := map[string]int{
+		"completed":   0,
+		"in_progress": 0,
+		"errored":     0,
+	}
 
 	for _, torrentID := range torrentIDs {
 		if trackingData, exists := me.getMetadata(torrentID, "tracking"); exists {
 			if trackingMap, ok := trackingData.(map[string]interface{}); ok {
 				if _, hasComplete := trackingMap["download_complete"]; hasComplete {
-					completed++
+					statusStats["completed"]++
 				} else {
 					if retries, ok := trackingMap["retry_count"].(float64); ok && retries > 0 {
-						errored++
+						statusStats["errored"]++
 					} else if retries, ok := trackingMap["retry_count"].(int); ok && retries > 0 {
-						errored++
+						statusStats["errored"]++
 					} else {
-						inProgress++
+						statusStats["in_progress"]++
 					}
 				}
 			}
 		}
 	}
 
-	report += "Download Status:\n"
-	report += fmt.Sprintf("  Completed: %d\n", completed)
-	report += fmt.Sprintf("  In Progress: %d\n", inProgress)
-	report += fmt.Sprintf("  With Errors: %d\n", errored)
+	return statusStats
+}
+
+// formatDownloadStatusReport formats download status statistics into a readable report section.
+func (me *MetadataExtensions) formatDownloadStatusReport(statusStats map[string]int) string {
+	report := "Download Status:\n"
+	report += fmt.Sprintf("  Completed: %d\n", statusStats["completed"])
+	report += fmt.Sprintf("  In Progress: %d\n", statusStats["in_progress"])
+	report += fmt.Sprintf("  With Errors: %d\n", statusStats["errored"])
 
 	return report
 }
