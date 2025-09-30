@@ -184,16 +184,14 @@ func (mm *MetadataManager) SetMetadata(request *MetadataRequest) *MetadataRespon
 	}
 
 	start := time.Now()
+	
+	mm.mu.Lock()
 	defer func() {
-		mm.mu.Lock()
 		mm.metrics.TotalOperations++
 		mm.metrics.AverageLatency = (mm.metrics.AverageLatency + time.Since(start)) / 2
 		mm.metrics.LastOperation = time.Now()
 		mm.mu.Unlock()
 	}()
-
-	mm.mu.Lock()
-	defer mm.mu.Unlock()
 
 	// Get or create torrent metadata
 	torrentMeta, exists := mm.metadata[request.TorrentID]
@@ -240,9 +238,7 @@ func (mm *MetadataManager) SetMetadata(request *MetadataRequest) *MetadataRespon
 	for key, value := range request.Set {
 		if err := mm.validateMetadata(key, value, torrentMeta); err != nil {
 			errors = append(errors, fmt.Sprintf("set key '%s': %v", key, err))
-			mm.mu.Lock()
 			mm.metrics.ValidationErrors++
-			mm.mu.Unlock()
 			continue
 		}
 
