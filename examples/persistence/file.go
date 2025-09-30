@@ -142,9 +142,31 @@ func (fp *FilePersistence) LoadTorrent(ctx context.Context, infoHash metainfo.Ha
 	}
 
 	var torrent rpc.TorrentState
-	if err := json.Unmarshal(data, &torrent); err != nil {
+
+	// First try to unmarshal into map to handle string info_hash
+	var dataMap map[string]interface{}
+	if err := json.Unmarshal(data, &dataMap); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal torrent data: %w", err)
+	}
+
+	// Convert info_hash from string to Hash if it exists
+	if _, ok := dataMap["info_hash"].(string); ok {
+		// Remove the string version and let the torrent.InfoHash be set below
+		delete(dataMap, "info_hash")
+	}
+
+	// Re-marshal and unmarshal into TorrentState
+	fixedData, err := json.Marshal(dataMap)
+	if err != nil {
+		return nil, fmt.Errorf("failed to re-marshal torrent data: %w", err)
+	}
+
+	if err := json.Unmarshal(fixedData, &torrent); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal torrent state: %w", err)
 	}
+
+	// Ensure info hash is set correctly
+	torrent.InfoHash = infoHash
 
 	// Load MetaInfo if available
 	if metaInfo, err := fp.loadMetaInfo(infoHash); err == nil {
@@ -398,8 +420,9 @@ func (fp *FilePersistence) loadTorrentFile(filename string) (*rpc.TorrentState, 
 	}
 
 	// Convert info_hash from string to Hash
-	if hashStr, ok := dataMap["info_hash"].(string); ok {
-		dataMap["info_hash"] = metainfo.NewHashFromString(hashStr)
+	if _, ok := dataMap["info_hash"].(string); ok {
+		// Remove the string version to avoid conflicts
+		delete(dataMap, "info_hash")
 	}
 
 	// Re-marshal and unmarshal into TorrentState

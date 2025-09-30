@@ -17,6 +17,7 @@ package persistence
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -152,6 +153,14 @@ func TestFilePersistence(t *testing.T) {
 
 	// Test multiple torrent persistence
 	t.Run("MultipleTorrents", func(t *testing.T) {
+		// Create a fresh subdirectory for this test
+		subDir := filepath.Join(tempDir, "multiple_test")
+		subFp, err := NewFilePersistence(subDir)
+		if err != nil {
+			t.Fatalf("Failed to create sub file persistence: %v", err)
+		}
+		defer subFp.Close()
+
 		torrents := []*rpc.TorrentState{
 			createTestTorrent(1),
 			createTestTorrent(2),
@@ -159,12 +168,12 @@ func TestFilePersistence(t *testing.T) {
 		}
 
 		// Save all torrents
-		if err := fp.SaveAllTorrents(ctx, torrents); err != nil {
+		if err := subFp.SaveAllTorrents(ctx, torrents); err != nil {
 			t.Fatalf("Failed to save all torrents: %v", err)
 		}
 
 		// Load all torrents
-		loadedTorrents, err := fp.LoadAllTorrents(ctx)
+		loadedTorrents, err := subFp.LoadAllTorrents(ctx)
 		if err != nil {
 			t.Fatalf("Failed to load all torrents: %v", err)
 		}
