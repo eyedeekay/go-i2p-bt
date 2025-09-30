@@ -319,6 +319,13 @@ func (ens *EventNotificationSystem) PublishEvent(event *Event) error {
 		return fmt.Errorf("event cannot be nil")
 	}
 
+	// Check if system is shut down
+	select {
+	case <-ens.shutdownCtx.Done():
+		return fmt.Errorf("event notification system is shut down")
+	default:
+	}
+
 	// Generate ID if not provided
 	if event.ID == "" {
 		event.ID = fmt.Sprintf("%d-%s", time.Now().UnixNano(), event.Type)
@@ -336,6 +343,8 @@ func (ens *EventNotificationSystem) PublishEvent(event *Event) error {
 		ens.metrics.LastEvent = time.Now()
 		ens.mu.Unlock()
 		return nil
+	case <-ens.shutdownCtx.Done():
+		return fmt.Errorf("event notification system is shut down")
 	default:
 		// Channel is full, drop event
 		ens.mu.Lock()
