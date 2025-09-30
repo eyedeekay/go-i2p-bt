@@ -380,23 +380,40 @@ func (p *PersistencePlugin) LoadTorrentState(torrentID int64) (*rpc.TorrentState
 
 // Example usage and demonstration
 
+// demonstratePersistencePlugin demonstrates the complete persistence plugin integration workflow.
+// This function coordinates the setup, execution, monitoring, and cleanup of persistence plugin features.
 func demonstratePersistencePlugin() {
 	fmt.Println("=== Plugin-Based Persistence Integration Example ===")
 
-	// Create plugin manager
+	pluginManager, metadataManager, persistencePlugin, tempDir := setupPluginEnvironment()
+	
+	torrent := createSampleTorrent()
+	params := map[string]interface{}{"source": "user_add"}
+	ctx := context.Background()
+
+	demonstrateBehaviorExecution(ctx, pluginManager, torrent, params)
+	demonstrateMetadataIntegration(pluginManager, metadataManager, torrent, params, ctx)
+	displayPluginMetricsAndHealth(pluginManager, persistencePlugin)
+	waitForPeriodicSave(pluginManager, persistencePlugin)
+	demonstrateStateLoading(persistencePlugin)
+	demonstrateTorrentRemoval(pluginManager, torrent, params, ctx)
+	cleanupResources(pluginManager, tempDir)
+
+	fmt.Println("Plugin-based persistence demonstration completed!")
+}
+
+// setupPluginEnvironment initializes and configures the plugin manager, metadata manager, and persistence plugin.
+// Returns the configured components and the temporary directory path for cleanup.
+func setupPluginEnvironment() (*rpc.PluginManager, *rpc.MetadataManager, *PersistencePlugin, string) {
 	pluginManager := rpc.NewPluginManager()
 	pluginManager.SetLogger(func(format string, args ...interface{}) {
 		log.Printf("[PluginManager] "+format, args...)
 	})
 
-	// Create metadata manager
 	metadataManager := rpc.NewMetadataManager()
-
-	// Create persistence plugin
 	tempDir := "/tmp/torrent_persistence_example"
 	persistencePlugin := NewPersistencePlugin(tempDir, 5*time.Second)
 
-	// Register plugin with configuration
 	config := map[string]interface{}{
 		"save_interval":    "3s",
 		"metadata_manager": metadataManager,
@@ -406,31 +423,37 @@ func demonstratePersistencePlugin() {
 		log.Fatalf("Failed to register persistence plugin: %v", err)
 	}
 
-	// Demonstrate plugin behavior execution
-	fmt.Println("\n--- Demonstrating Plugin Behavior Execution ---")
+	return pluginManager, metadataManager, persistencePlugin, tempDir
+}
 
-	// Simulate torrent add
-	torrent := &rpc.TorrentState{
+// createSampleTorrent creates a sample torrent state for demonstration purposes.
+// Returns a configured TorrentState with typical download parameters.
+func createSampleTorrent() *rpc.TorrentState {
+	return &rpc.TorrentState{
 		ID:          1,
 		Status:      rpc.TorrentStatusDownloading,
 		DownloadDir: "/downloads",
 		Downloaded:  1024,
 		Uploaded:    512,
 	}
+}
 
-	params := map[string]interface{}{
-		"source": "user_add",
-	}
+// demonstrateBehaviorExecution shows how the plugin manager executes behavior plugins for torrent operations.
+// Executes a torrent-add behavior and reports the results.
+func demonstrateBehaviorExecution(ctx context.Context, pluginManager *rpc.PluginManager, torrent *rpc.TorrentState, params map[string]interface{}) {
+	fmt.Println("\n--- Demonstrating Plugin Behavior Execution ---")
 
-	ctx := context.Background()
 	result, err := pluginManager.ExecuteBehaviorPlugins(ctx, "torrent-add", torrent, params)
 	if err != nil {
 		log.Printf("Behavior execution failed: %v", err)
 	} else {
 		fmt.Printf("Torrent add behavior result: %+v\n", result)
 	}
+}
 
-	// Set some metadata
+// demonstrateMetadataIntegration shows how metadata operations integrate with the persistence plugin.
+// Sets metadata for a torrent and triggers the metadata-set behavior.
+func demonstrateMetadataIntegration(pluginManager *rpc.PluginManager, metadataManager *rpc.MetadataManager, torrent *rpc.TorrentState, params map[string]interface{}, ctx context.Context) {
 	fmt.Println("\n--- Demonstrating Metadata Integration ---")
 
 	metadataRequest := &rpc.MetadataRequest{
@@ -448,16 +471,18 @@ func demonstratePersistencePlugin() {
 	if metadataResponse.Success {
 		fmt.Printf("Metadata set successfully, version: %d\n", metadataResponse.NewVersion)
 
-		// Trigger metadata save through plugin
-		result, err = pluginManager.ExecuteBehaviorPlugins(ctx, "metadata-set", torrent, params)
+		_, err := pluginManager.ExecuteBehaviorPlugins(ctx, "metadata-set", torrent, params)
 		if err != nil {
 			log.Printf("Metadata behavior execution failed: %v", err)
 		}
 	} else {
 		fmt.Printf("Metadata set failed: %v\n", metadataResponse.Errors)
 	}
+}
 
-	// Show plugin metrics
+// displayPluginMetricsAndHealth retrieves and displays current plugin metrics and health status.
+// Shows performance data and operational status for the persistence plugin.
+func displayPluginMetricsAndHealth(pluginManager *rpc.PluginManager, persistencePlugin *PersistencePlugin) {
 	fmt.Println("\n--- Plugin Metrics ---")
 
 	metrics := pluginManager.GetMetrics()
@@ -468,28 +493,32 @@ func demonstratePersistencePlugin() {
 		}
 	}
 
-	// Show health status
 	health := pluginManager.GetPluginHealthStatus()
 	if pluginHealth, exists := health[persistencePlugin.ID()]; exists {
 		fmt.Printf("\nPersistence Plugin Health:\n")
 		fmt.Printf("  Status: %s\n", pluginHealth.Status)
 		fmt.Printf("  Message: %s\n", pluginHealth.Message)
 	}
+}
 
-	// Wait for a save cycle
+// waitForPeriodicSave pauses execution to allow the persistence plugin to complete a save cycle.
+// Displays updated metrics after the save operation completes.
+func waitForPeriodicSave(pluginManager *rpc.PluginManager, persistencePlugin *PersistencePlugin) {
 	fmt.Println("\n--- Waiting for Periodic Save ---")
 	time.Sleep(4 * time.Second)
 
-	// Show updated metrics
-	metrics = pluginManager.GetMetrics()
+	metrics := pluginManager.GetMetrics()
 	if pluginMetrics, exists := metrics[persistencePlugin.ID()]; exists {
 		fmt.Printf("Updated Plugin Metrics:\n")
 		for key, value := range pluginMetrics.(map[string]interface{}) {
 			fmt.Printf("  %s: %v\n", key, value)
 		}
 	}
+}
 
-	// Demonstrate loading
+// demonstrateStateLoading shows how to retrieve previously saved torrent state data.
+// Attempts to load torrent state and displays the results or error messages.
+func demonstrateStateLoading(persistencePlugin *PersistencePlugin) {
 	fmt.Println("\n--- Demonstrating State Loading ---")
 
 	loadedTorrent, err := persistencePlugin.LoadTorrentState(1)
@@ -501,30 +530,33 @@ func demonstratePersistencePlugin() {
 	} else {
 		fmt.Println("No saved state found for torrent 1")
 	}
+}
 
-	// Simulate torrent removal
+// demonstrateTorrentRemoval executes the torrent removal behavior through the plugin system.
+// Shows how torrent removal operations are handled by behavior plugins.
+func demonstrateTorrentRemoval(pluginManager *rpc.PluginManager, torrent *rpc.TorrentState, params map[string]interface{}, ctx context.Context) {
 	fmt.Println("\n--- Demonstrating Torrent Removal ---")
 
-	result, err = pluginManager.ExecuteBehaviorPlugins(ctx, "torrent-remove", torrent, params)
+	_, err := pluginManager.ExecuteBehaviorPlugins(ctx, "torrent-remove", torrent, params)
 	if err != nil {
 		log.Printf("Remove behavior execution failed: %v", err)
 	} else {
 		fmt.Printf("Torrent remove behavior completed\n")
 	}
+}
 
-	// Cleanup
+// cleanupResources performs cleanup operations for the plugin demonstration.
+// Shuts down the plugin manager and removes temporary directories.
+func cleanupResources(pluginManager *rpc.PluginManager, tempDir string) {
 	fmt.Println("\n--- Cleanup ---")
 
 	if err := pluginManager.Shutdown(); err != nil {
 		log.Printf("Plugin manager shutdown failed: %v", err)
 	}
 
-	// Remove temp directory
 	if err := os.RemoveAll(tempDir); err != nil {
 		log.Printf("Failed to cleanup temp directory: %v", err)
 	}
-
-	fmt.Println("Plugin-based persistence demonstration completed!")
 }
 
 func main() {
