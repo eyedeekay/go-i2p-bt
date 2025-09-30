@@ -529,6 +529,9 @@ func (tm *TorrentManager) determineDownloadDirectory(requestedDir string, isComp
 		return requestedDir
 	}
 
+	tm.sessionMu.RLock()
+	defer tm.sessionMu.RUnlock()
+
 	// If incomplete directory is enabled and torrent is not complete, use incomplete directory
 	if tm.sessionConfig.IncompleteDirEnabled && !isComplete && tm.sessionConfig.IncompleteDir != "" {
 		return tm.sessionConfig.IncompleteDir
@@ -630,7 +633,11 @@ func (tm *TorrentManager) extractTrackerList(torrentState *TorrentState, metaInf
 
 // handleTorrentStartup handles the startup process for a newly added torrent
 func (tm *TorrentManager) handleTorrentStartup(torrentState *TorrentState, paused, hasMetadata bool) {
-	if !paused && tm.sessionConfig.StartAddedTorrents {
+	tm.sessionMu.RLock()
+	startAddedTorrents := tm.sessionConfig.StartAddedTorrents
+	tm.sessionMu.RUnlock()
+
+	if !paused && startAddedTorrents {
 		go tm.startTorrent(torrentState)
 	} else if !paused && hasMetadata {
 		// Verify existing data for non-paused torrents only
