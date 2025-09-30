@@ -84,6 +84,7 @@ type TorrentManager struct {
 	scriptManager      *ScriptManager
 	pexManager         *PEXManager
 	webseedManager     *WebSeedManager
+	hookManager        *HookManager
 
 	// Thread-safe torrent storage
 	mu       sync.RWMutex
@@ -181,6 +182,10 @@ func NewTorrentManager(config TorrentManagerConfig) (*TorrentManager, error) {
 	tm.scriptManager = NewScriptManager()
 	tm.scriptManager.SetLogger(tm.log)
 	tm.updateScriptConfiguration(config.SessionConfig)
+
+	// Initialize hook manager for lifecycle event callbacks
+	tm.hookManager = NewHookManager()
+	tm.hookManager.SetLogger(tm.log)
 
 	// Initialize PEX manager
 	tm.pexManager = NewPEXManager(config.SessionConfig.PEXEnabled)
@@ -443,6 +448,9 @@ func (tm *TorrentManager) AddTorrent(req TorrentAddRequest) (*TorrentState, erro
 		}
 	}()
 
+	// Execute torrent-added lifecycle hooks
+	tm.hookManager.ExecuteHooks(HookEventTorrentAdded, &torrentSnapshot, nil)
+
 	// Start download process if appropriate
 	tm.handleTorrentStartup(torrentState, req.Paused, metaInfo != nil)
 
@@ -574,6 +582,17 @@ func (tm *TorrentManager) initializeFileInfo(torrentState *TorrentState, metaInf
 	tm.setupFileArrays(torrentState, info)
 	tm.populateFileInfo(torrentState, info)
 	tm.extractTrackerList(torrentState, metaInfo)
+
+	// Execute metadata received hook after successful initialization
+	go func() {
+		// Create snapshot for hook execution
+		torrentSnapshot := *torrentState
+		tm.hookManager.ExecuteHooks(HookEventTorrentMetadata, &torrentSnapshot, map[string]interface{}{
+			"action":     "metadata_received",
+			"file_count": len(info.Files),
+			"total_size": info.TotalLength(),
+		})
+	}()
 
 	return nil
 }
@@ -737,10 +756,10 @@ func (tm *TorrentManager) StartTorrentNow(id int64) error {
 // StopTorrent stops downloading/seeding a torrent
 func (tm *TorrentManager) StopTorrent(id int64) error {
 	tm.mu.Lock()
-	defer tm.mu.Unlock()
 
 	torrent, exists := tm.torrents[id]
 	if !exists {
+		tm.mu.Unlock()
 		return fmt.Errorf("torrent with ID %d not found", id)
 	}
 
@@ -748,6 +767,15 @@ func (tm *TorrentManager) StopTorrent(id int64) error {
 	tm.queueManager.RemoveFromQueue(id)
 
 	torrent.Status = TorrentStatusStopped
+
+	// Create snapshot for hook execution
+	torrentSnapshot := *torrent
+	tm.mu.Unlock()
+
+	// Execute torrent-stopped lifecycle hooks
+	tm.hookManager.ExecuteHooks(HookEventTorrentStopped, &torrentSnapshot, map[string]interface{}{
+		"action": "stopped",
+	})
 
 	// TODO: Implement actual stopping of download/upload operations
 
@@ -757,10 +785,10 @@ func (tm *TorrentManager) StopTorrent(id int64) error {
 // RemoveTorrent removes a torrent from the manager
 func (tm *TorrentManager) RemoveTorrent(id int64, deleteData bool) error {
 	tm.mu.Lock()
-	defer tm.mu.Unlock()
 
 	torrent, exists := tm.torrents[id]
 	if !exists {
+		tm.mu.Unlock()
 		return fmt.Errorf("torrent with ID %d not found", id)
 	}
 
@@ -770,10 +798,20 @@ func (tm *TorrentManager) RemoveTorrent(id int64, deleteData bool) error {
 	// Stop the torrent first
 	torrent.Status = TorrentStatusStopped
 
+	// Create snapshot for hook execution before removal
+	torrentSnapshot := *torrent
+
 	// TODO: If deleteData is true, delete the downloaded files
 
 	// Remove from torrents map
 	delete(tm.torrents, id)
+	tm.mu.Unlock()
+
+	// Execute torrent-removed lifecycle hooks
+	tm.hookManager.ExecuteHooks(HookEventTorrentRemoved, &torrentSnapshot, map[string]interface{}{
+		"delete_data": deleteData,
+		"action":      "removed",
+	})
 
 	atomic.AddInt64(&tm.stats.TorrentsRemoved, 1)
 
@@ -1608,6 +1646,12 @@ func (tm *TorrentManager) handleCompletionStateChange(torrent *TorrentState) {
 		// Create a snapshot of torrent state for script hook to avoid race conditions
 		torrentSnapshot := *torrent
 		go tm.executeTorrentDoneHook(&torrentSnapshot)
+
+		// Execute torrent-completed lifecycle hooks
+		tm.hookManager.ExecuteHooks(HookEventTorrentCompleted, &torrentSnapshot, map[string]interface{}{
+			"action":       "completed",
+			"percent_done": torrentSnapshot.PercentDone,
+		})
 	}
 }
 
@@ -2085,15 +2129,33 @@ func (tm *TorrentManager) onTorrentActivated(torrentID int64, queueType QueueTyp
 		if torrent.Status == TorrentStatusQueuedDown {
 			torrent.Status = TorrentStatusDownloading
 			tm.log("Torrent %d activated for downloading", torrentID)
+			// Create snapshot for hook execution
+			torrentSnapshot := *torrent
+			tm.mu.Unlock()
+			// Execute torrent-started lifecycle hooks
+			tm.hookManager.ExecuteHooks(HookEventTorrentStarted, &torrentSnapshot, map[string]interface{}{
+				"queue_type": "download",
+				"action":     "activated",
+			})
 			// Start actual download operation
 			go tm.startTorrentDownload(torrent)
+			return
 		}
 	case SeedQueue:
 		if torrent.Status == TorrentStatusQueuedSeed {
 			torrent.Status = TorrentStatusSeeding
 			tm.log("Torrent %d activated for seeding", torrentID)
+			// Create snapshot for hook execution
+			torrentSnapshot := *torrent
+			tm.mu.Unlock()
+			// Execute torrent-started lifecycle hooks
+			tm.hookManager.ExecuteHooks(HookEventTorrentStarted, &torrentSnapshot, map[string]interface{}{
+				"queue_type": "seed",
+				"action":     "activated",
+			})
 			// Start actual seeding operation
 			go tm.startTorrentSeeding(torrent)
+			return
 		}
 	}
 
@@ -2116,11 +2178,29 @@ func (tm *TorrentManager) onTorrentDeactivated(torrentID int64, queueType QueueT
 		if torrent.Status == TorrentStatusDownloading {
 			torrent.Status = TorrentStatusQueuedDown
 			tm.log("Torrent %d deactivated to download queue", torrentID)
+			// Create snapshot for hook execution
+			torrentSnapshot := *torrent
+			tm.mu.Unlock()
+			// Execute torrent-stopped lifecycle hooks
+			tm.hookManager.ExecuteHooks(HookEventTorrentStopped, &torrentSnapshot, map[string]interface{}{
+				"queue_type": "download",
+				"action":     "deactivated",
+			})
+			return
 		}
 	case SeedQueue:
 		if torrent.Status == TorrentStatusSeeding {
 			torrent.Status = TorrentStatusQueuedSeed
 			tm.log("Torrent %d deactivated to seed queue", torrentID)
+			// Create snapshot for hook execution
+			torrentSnapshot := *torrent
+			tm.mu.Unlock()
+			// Execute torrent-stopped lifecycle hooks
+			tm.hookManager.ExecuteHooks(HookEventTorrentStopped, &torrentSnapshot, map[string]interface{}{
+				"queue_type": "seed",
+				"action":     "deactivated",
+			})
+			return
 		}
 	}
 
@@ -2287,6 +2367,34 @@ func (tm *TorrentManager) GetWebSeeds(torrentID int64) []*WebSeed {
 // GetWebSeedStats returns WebSeed statistics
 func (tm *TorrentManager) GetWebSeedStats() map[string]interface{} {
 	return tm.webseedManager.GetStats()
+}
+
+// Hook Management Methods - Public API for downstream applications
+
+// RegisterHook registers a callback function to be executed on torrent lifecycle events
+// This allows downstream applications to implement custom behavior for torrent events
+func (tm *TorrentManager) RegisterHook(hook *Hook) error {
+	return tm.hookManager.RegisterHook(hook)
+}
+
+// UnregisterHook removes a previously registered hook by its ID
+func (tm *TorrentManager) UnregisterHook(hookID string) error {
+	return tm.hookManager.UnregisterHook(hookID)
+}
+
+// GetHookMetrics returns performance metrics for hook execution
+func (tm *TorrentManager) GetHookMetrics() HookMetrics {
+	return tm.hookManager.GetMetrics()
+}
+
+// ListHooks returns information about all currently registered hooks
+func (tm *TorrentManager) ListHooks() map[string][]string {
+	return tm.hookManager.ListHooks()
+}
+
+// SetHookTimeout sets the default timeout for hook execution
+func (tm *TorrentManager) SetHookTimeout(timeout time.Duration) {
+	tm.hookManager.SetDefaultTimeout(timeout)
 }
 
 // RetryFailedWebSeeds retries failed webseeds for a torrent
