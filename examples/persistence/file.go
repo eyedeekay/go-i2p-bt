@@ -64,10 +64,10 @@ func NewFilePersistence(dataDir string) (*FilePersistence, error) {
 	}
 
 	// Create directory structure
-	if err := os.MkdirAll(fp.torrentsDir, 0755); err != nil {
+	if err := os.MkdirAll(fp.torrentsDir, 0o755); err != nil {
 		return nil, fmt.Errorf("failed to create torrents directory: %w", err)
 	}
-	if err := os.MkdirAll(fp.metadataDir, 0755); err != nil {
+	if err := os.MkdirAll(fp.metadataDir, 0o755); err != nil {
 		return nil, fmt.Errorf("failed to create metadata directory: %w", err)
 	}
 
@@ -101,7 +101,7 @@ func (fp *FilePersistence) SaveTorrent(ctx context.Context, torrent *rpc.Torrent
 	torrentFile := fp.getTorrentFilePath(torrent.InfoHash)
 	tempFile := torrentFile + ".tmp"
 
-	if err := os.WriteFile(tempFile, data, 0644); err != nil {
+	if err := os.WriteFile(tempFile, data, 0o644); err != nil {
 		return fmt.Errorf("failed to write temporary file: %w", err)
 	}
 
@@ -217,7 +217,7 @@ func (fp *FilePersistence) SaveAllTorrents(ctx context.Context, torrents []*rpc.
 		tempFile := torrentFile + ".tmp"
 		tempFiles[torrentFile] = tempFile
 
-		if err := os.WriteFile(tempFile, data, 0644); err != nil {
+		if err := os.WriteFile(tempFile, data, 0o644); err != nil {
 			cleanup()
 			return fmt.Errorf("failed to write temporary file for %s: %w", torrent.InfoHash.String(), err)
 		}
@@ -327,7 +327,7 @@ func (fp *FilePersistence) SaveSessionConfig(ctx context.Context, config *rpc.Se
 
 	// Write atomically using temporary file
 	tempFile := fp.sessionFile + ".tmp"
-	if err := os.WriteFile(tempFile, data, 0644); err != nil {
+	if err := os.WriteFile(tempFile, data, 0o644); err != nil {
 		return fmt.Errorf("failed to write temporary session file: %w", err)
 	}
 

@@ -16,9 +16,9 @@
 // with the go-i2p-bt RPC server using the lifecycle hook system.
 //
 // This example shows three different approaches:
-//   1. File-based persistence for simple deployments
-//   2. Memory persistence with periodic snapshots for high-performance scenarios
-//   3. Database persistence for production deployments (requires additional dependencies)
+//  1. File-based persistence for simple deployments
+//  2. Memory persistence with periodic snapshots for high-performance scenarios
+//  3. Database persistence for production deployments (requires additional dependencies)
 //
 // The example demonstrates best practices for:
 //   - Graceful startup and shutdown
@@ -38,6 +38,7 @@ import (
 	"time"
 
 	"github.com/go-i2p/go-i2p-bt/dht"
+	"github.com/go-i2p/go-i2p-bt/downloader"
 	"github.com/go-i2p/go-i2p-bt/examples/persistence"
 	"github.com/go-i2p/go-i2p-bt/rpc"
 )
@@ -45,47 +46,47 @@ import (
 // Configuration represents the application configuration
 type Configuration struct {
 	// Server configuration
-	ListenAddr     string
-	Username       string
-	Password       string
-	
+	ListenAddr string
+	Username   string
+	Password   string
+
 	// Torrent configuration
-	DownloadDir    string
-	DHTEnabled     bool
-	DHTListenAddr  string
-	
+	DownloadDir   string
+	DHTEnabled    bool
+	DHTListenAddr string
+
 	// Persistence configuration
-	PersistenceType    string        // "file", "memory", "database"
-	DataDir           string        // For file and database persistence
-	SnapshotInterval  time.Duration // For memory persistence with backup
-	
+	PersistenceType  string        // "file", "memory", "database"
+	DataDir          string        // For file and database persistence
+	SnapshotInterval time.Duration // For memory persistence with backup
+
 	// Performance configuration
-	MaxTorrents       int
+	MaxTorrents         int
 	SessionSaveInterval time.Duration
 }
 
 func main() {
 	// Load configuration from environment or use defaults
 	config := loadConfiguration()
-	
+
 	// Create persistence layer based on configuration
 	persistence, err := createPersistence(config)
 	if err != nil {
 		log.Fatalf("Failed to create persistence layer: %v", err)
 	}
 	defer persistence.Close()
-	
+
 	// Create torrent manager with persistence hooks
 	manager, hookManager, err := createTorrentManager(config, persistence)
 	if err != nil {
 		log.Fatalf("Failed to create torrent manager: %v", err)
 	}
-	
+
 	// Try to restore previous session state
 	if err := restoreSessionState(manager, persistence); err != nil {
 		log.Printf("Warning: Failed to restore session state: %v", err)
 	}
-	
+
 	// Create RPC server
 	server, err := rpc.NewServer(rpc.ServerConfig{
 		TorrentManager: manager,
@@ -95,13 +96,13 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to create RPC server: %v", err)
 	}
-	
+
 	// Start HTTP server
 	httpServer := &http.Server{
 		Addr:    config.ListenAddr,
 		Handler: server,
 	}
-	
+
 	// Start server in background
 	go func() {
 		log.Printf("Starting RPC server on %s with %s persistence", config.ListenAddr, config.PersistenceType)
@@ -109,48 +110,48 @@ func main() {
 			log.Fatalf("HTTP server error: %v", err)
 		}
 	}()
-	
+
 	// Start periodic session saving
 	sessionSaver := startSessionSaver(manager, persistence, config.SessionSaveInterval)
 	defer sessionSaver.Stop()
-	
+
 	// Start performance monitoring
 	perfMonitor := startPerformanceMonitor(manager, persistence, hookManager)
 	defer perfMonitor.Stop()
-	
+
 	// Wait for shutdown signal
 	waitForShutdown()
-	
+
 	// Graceful shutdown
 	log.Println("Shutting down gracefully...")
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	
+
 	// Save final session state
 	if err := saveSessionState(ctx, manager, persistence); err != nil {
 		log.Printf("Warning: Failed to save final session state: %v", err)
 	}
-	
+
 	// Shutdown HTTP server
 	if err := httpServer.Shutdown(ctx); err != nil {
 		log.Printf("HTTP server shutdown error: %v", err)
 	}
-	
+
 	log.Println("Shutdown complete")
 }
 
 func loadConfiguration() Configuration {
 	return Configuration{
 		ListenAddr:          getEnv("LISTEN_ADDR", ":9091"),
-		Username:           getEnv("RPC_USERNAME", "admin"),
-		Password:           getEnv("RPC_PASSWORD", "secret"),
-		DownloadDir:        getEnv("DOWNLOAD_DIR", "./downloads"),
-		DHTEnabled:         getEnv("DHT_ENABLED", "true") == "true",
-		DHTListenAddr:      getEnv("DHT_LISTEN_ADDR", ":6881"),
-		PersistenceType:    getEnv("PERSISTENCE_TYPE", "file"),
-		DataDir:           getEnv("DATA_DIR", "./data"),
-		SnapshotInterval:  parseDuration(getEnv("SNAPSHOT_INTERVAL", "5m")),
-		MaxTorrents:       parseInt(getEnv("MAX_TORRENTS", "100")),
+		Username:            getEnv("RPC_USERNAME", "admin"),
+		Password:            getEnv("RPC_PASSWORD", "secret"),
+		DownloadDir:         getEnv("DOWNLOAD_DIR", "./downloads"),
+		DHTEnabled:          getEnv("DHT_ENABLED", "true") == "true",
+		DHTListenAddr:       getEnv("DHT_LISTEN_ADDR", ":6881"),
+		PersistenceType:     getEnv("PERSISTENCE_TYPE", "file"),
+		DataDir:             getEnv("DATA_DIR", "./data"),
+		SnapshotInterval:    parseDuration(getEnv("SNAPSHOT_INTERVAL", "5m")),
+		MaxTorrents:         parseInt(getEnv("MAX_TORRENTS", "100")),
 		SessionSaveInterval: parseDuration(getEnv("SESSION_SAVE_INTERVAL", "30s")),
 	}
 }
@@ -159,21 +160,21 @@ func createPersistence(config Configuration) (persistence.TorrentPersistence, er
 	switch config.PersistenceType {
 	case "file":
 		return persistence.NewFilePersistence(config.DataDir)
-		
+
 	case "memory":
 		// Create backup file persistence for snapshots
 		backup, err := persistence.NewFilePersistence(config.DataDir + "/backup")
 		if err != nil {
 			return nil, fmt.Errorf("failed to create backup persistence: %w", err)
 		}
-		
+
 		return persistence.NewMemoryPersistence(backup, config.SnapshotInterval), nil
-		
+
 	case "database":
 		// Note: This requires adding github.com/mattn/go-sqlite3 to go.mod
 		// return persistence.NewDatabasePersistence(config.DataDir+"/torrents.db", true)
 		return nil, fmt.Errorf("database persistence requires adding sqlite3 dependency to go.mod")
-		
+
 	default:
 		return nil, fmt.Errorf("unknown persistence type: %s", config.PersistenceType)
 	}
@@ -185,7 +186,7 @@ func createTorrentManager(config Configuration, pers persistence.TorrentPersiste
 	hookManager.SetLogger(func(format string, args ...interface{}) {
 		log.Printf("[HOOK] "+format, args...)
 	})
-	
+
 	// Create persistence hook for automatic state saving
 	persistenceHook := persistence.NewPersistenceHook(pers)
 	if err := hookManager.RegisterHook(&rpc.Hook{
@@ -198,36 +199,49 @@ func createTorrentManager(config Configuration, pers persistence.TorrentPersiste
 			rpc.HookEventTorrentCompleted,
 			rpc.HookEventTorrentRemoved,
 		},
-		Priority:        100, // High priority for persistence
+		Priority:        100,  // High priority for persistence
 		ContinueOnError: true, // Don't stop other hooks if persistence fails
 	}); err != nil {
 		return nil, nil, fmt.Errorf("failed to register persistence hook: %w", err)
 	}
-	
+
 	// Create additional monitoring hooks
 	if err := registerMonitoringHooks(hookManager); err != nil {
 		return nil, nil, fmt.Errorf("failed to register monitoring hooks: %w", err)
 	}
-	
+
 	// Create torrent manager configuration
 	managerConfig := rpc.TorrentManagerConfig{
-		DownloadDir: config.DownloadDir,
-		HookManager: hookManager,
+		DownloadDir:          config.DownloadDir,
+		HookManager:          hookManager,
+		DHTConfig:            dht.Config{},
+		DownloaderConfig:     downloader.TorrentDownloaderConfig{},
+		IncompleteDir:        "",
+		IncompleteDirEnabled: false,
+		ErrorLog: func(format string, args ...interface{}) {
+			panic("TODO")
+		},
+		MaxTorrents:         0,
+		PeerLimitGlobal:     0,
+		PeerLimitPerTorrent: 0,
+		PeerPort:            0,
+		SessionConfig:       rpc.SessionConfiguration{},
 	}
-	
+
 	// Configure DHT if enabled
 	if config.DHTEnabled {
-		managerConfig.DHTConfig = &dht.Config{
-			ListenAddr: config.DHTListenAddr,
+		managerConfig.DHTConfig = dht.Config{
+			// Remove ListenAddr field as it doesn't exist in dht.Config
+			// Add appropriate fields based on the actual dht.Config struct
 		}
 	}
-	
+
 	// Create torrent manager
 	manager, err := rpc.NewTorrentManager(managerConfig)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to create torrent manager: %w", err)
 	}
-	
+
 	return manager, hookManager, nil
 }
 
@@ -246,7 +260,7 @@ func registerMonitoringHooks(hookManager *rpc.HookManager) error {
 			case rpc.HookEventTorrentAdded:
 				log.Printf("Torrent added: %s", ctx.Torrent.InfoHash.String())
 			case rpc.HookEventTorrentCompleted:
-				log.Printf("Torrent completed: %s (%.1f%% done)", 
+				log.Printf("Torrent completed: %s (%.1f%% done)",
 					ctx.Torrent.InfoHash.String(), ctx.Torrent.PercentDone*100)
 			case rpc.HookEventTorrentError:
 				if errorMsg, ok := ctx.Data["error"].(string); ok {
@@ -256,13 +270,13 @@ func registerMonitoringHooks(hookManager *rpc.HookManager) error {
 			return nil
 		},
 	}
-	
+
 	return hookManager.RegisterHook(logHook)
 }
 
 func restoreSessionState(manager *rpc.TorrentManager, pers persistence.TorrentPersistence) error {
 	ctx := context.Background()
-	
+
 	// Load session configuration
 	if sessionConfig, err := pers.LoadSessionConfig(ctx); err == nil {
 		if err := manager.UpdateSessionConfig(sessionConfig); err != nil {
@@ -271,18 +285,18 @@ func restoreSessionState(manager *rpc.TorrentManager, pers persistence.TorrentPe
 			log.Println("Session configuration restored")
 		}
 	}
-	
+
 	// Load all torrents
 	torrents, err := pers.LoadAllTorrents(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to load torrents: %w", err)
 	}
-	
+
 	if len(torrents) == 0 {
 		log.Println("No previous torrents found")
 		return nil
 	}
-	
+
 	// Restore torrents to manager
 	restored := 0
 	for _, torrent := range torrents {
@@ -299,7 +313,7 @@ func restoreSessionState(manager *rpc.TorrentManager, pers persistence.TorrentPe
 		}
 		restored++
 	}
-	
+
 	log.Printf("Restored %d torrents from persistence", restored)
 	return nil
 }
@@ -310,7 +324,7 @@ func saveSessionState(ctx context.Context, manager *rpc.TorrentManager, pers per
 	if err := pers.SaveSessionConfig(ctx, sessionConfig); err != nil {
 		return fmt.Errorf("failed to save session config: %w", err)
 	}
-	
+
 	// Get all current torrents
 	torrents := manager.GetAllTorrents()
 	if len(torrents) > 0 {
@@ -318,7 +332,7 @@ func saveSessionState(ctx context.Context, manager *rpc.TorrentManager, pers per
 			return fmt.Errorf("failed to save torrents: %w", err)
 		}
 	}
-	
+
 	return nil
 }
 
@@ -326,11 +340,11 @@ func startSessionSaver(manager *rpc.TorrentManager, pers persistence.TorrentPers
 	saver := &PeriodicSaver{
 		stopCh: make(chan struct{}),
 	}
-	
+
 	go func() {
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
-		
+
 		for {
 			select {
 			case <-ticker.C:
@@ -339,13 +353,13 @@ func startSessionSaver(manager *rpc.TorrentManager, pers persistence.TorrentPers
 					log.Printf("Periodic session save failed: %v", err)
 				}
 				cancel()
-				
+
 			case <-saver.stopCh:
 				return
 			}
 		}
 	}()
-	
+
 	return saver
 }
 
@@ -353,37 +367,37 @@ func startPerformanceMonitor(manager *rpc.TorrentManager, pers persistence.Torre
 	monitor := &PerformanceMonitor{
 		stopCh: make(chan struct{}),
 	}
-	
+
 	go func() {
 		ticker := time.NewTicker(60 * time.Second) // Report every minute
 		defer ticker.Stop()
-		
+
 		for {
 			select {
 			case <-ticker.C:
 				// Get hook metrics
 				hookMetrics := hookManager.GetMetrics()
-				
+
 				// Get persistence stats (if available)
 				var persistenceStats map[string]interface{}
 				if mp, ok := pers.(*persistence.MemoryPersistence); ok {
 					persistenceStats = mp.GetStatistics()
 				}
-				
+
 				// Log performance summary
-				log.Printf("Performance: Hook executions=%d errors=%d avg_latency=%v", 
+				log.Printf("Performance: Hook executions=%d errors=%d avg_latency=%v",
 					hookMetrics.TotalExecutions, hookMetrics.TotalErrors, hookMetrics.AverageLatency)
-				
+
 				if persistenceStats != nil {
 					log.Printf("Persistence: %v", persistenceStats)
 				}
-				
+
 			case <-monitor.stopCh:
 				return
 			}
 		}
 	}()
-	
+
 	return monitor
 }
 
