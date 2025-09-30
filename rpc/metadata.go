@@ -116,14 +116,14 @@ type MetadataManager struct {
 
 	// Storage for torrent metadata
 	metadata map[int64]*TorrentMetadata
-	
+
 	// Validation constraints
 	constraints MetadataConstraints
-	
+
 	// Event callbacks
 	onMetadataChanged func(torrentID int64, key string, oldValue, newValue *MetadataValue)
 	onMetadataRemoved func(torrentID int64, key string, removedValue *MetadataValue)
-	
+
 	// Performance metrics
 	metrics MetadataMetrics
 }
@@ -228,7 +228,7 @@ func (mm *MetadataManager) SetMetadata(request *MetadataRequest) *MetadataRespon
 		if oldValue, exists := torrentMeta.Metadata[key]; exists {
 			delete(torrentMeta.Metadata, key)
 			mm.metrics.TotalKeys--
-			
+
 			// Trigger callback
 			if mm.onMetadataRemoved != nil {
 				mm.onMetadataRemoved(request.TorrentID, key, oldValue)
