@@ -584,15 +584,15 @@ func (tm *TorrentManager) initializeFileInfo(torrentState *TorrentState, metaInf
 	tm.extractTrackerList(torrentState, metaInfo)
 
 	// Execute metadata received hook after successful initialization
-	go func() {
-		// Create snapshot for hook execution
-		torrentSnapshot := *torrentState
-		tm.hookManager.ExecuteHooks(HookEventTorrentMetadata, &torrentSnapshot, map[string]interface{}{
+	// Create snapshot before launching goroutine to avoid race conditions
+	torrentSnapshot := *torrentState
+	go func(snapshot TorrentState) {
+		tm.hookManager.ExecuteHooks(HookEventTorrentMetadata, &snapshot, map[string]interface{}{
 			"action":     "metadata_received",
 			"file_count": len(info.Files),
 			"total_size": info.TotalLength(),
 		})
-	}()
+	}(torrentSnapshot)
 
 	return nil
 }
