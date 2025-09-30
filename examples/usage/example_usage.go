@@ -29,6 +29,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"log"
 	"net/http"
@@ -37,6 +38,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/go-i2p/go-i2p-bt/bencode"
 	"github.com/go-i2p/go-i2p-bt/dht"
 	"github.com/go-i2p/go-i2p-bt/downloader"
 	"github.com/go-i2p/go-i2p-bt/examples/persistence"
@@ -213,7 +215,6 @@ func createTorrentManager(config Configuration, pers persistence.TorrentPersiste
 	// Create torrent manager configuration
 	managerConfig := rpc.TorrentManagerConfig{
 		DownloadDir:          config.DownloadDir,
-		HookManager:          hookManager,
 		DHTConfig:            dht.Config{},
 		DownloaderConfig:     downloader.TorrentDownloaderConfig{},
 		IncompleteDir:        "",
@@ -279,7 +280,7 @@ func restoreSessionState(manager *rpc.TorrentManager, pers persistence.TorrentPe
 
 	// Load session configuration
 	if sessionConfig, err := pers.LoadSessionConfig(ctx); err == nil {
-		if err := manager.UpdateSessionConfig(sessionConfig); err != nil {
+		if err := manager.UpdateSessionConfig(*sessionConfig); err != nil {
 			log.Printf("Warning: Failed to restore session config: %v", err)
 		} else {
 			log.Println("Session configuration restored")
@@ -303,11 +304,19 @@ func restoreSessionState(manager *rpc.TorrentManager, pers persistence.TorrentPe
 		// Add torrent back to manager (this will trigger hooks)
 		if torrent.MetaInfo != nil {
 			// Use MetaInfo if available
-			if _, err := manager.AddTorrent(torrent.MetaInfo, rpc.AddTorrentOptions{
+			addReq := rpc.TorrentAddRequest{
 				DownloadDir: torrent.DownloadDir,
 				Paused:      torrent.Status == rpc.TorrentStatusStopped,
-			}); err != nil {
-				log.Printf("Warning: Failed to restore torrent %s: %v", torrent.InfoHash.String(), err)
+			}
+			// Convert MetaInfo to base64 string for the request
+			if metaBytes, err := bencode.EncodeBytes(torrent.MetaInfo); err == nil {
+				addReq.Metainfo = base64.StdEncoding.EncodeToString(metaBytes)
+				if _, err := manager.AddTorrent(addReq); err != nil {
+					log.Printf("Warning: Failed to restore torrent %s: %v", torrent.InfoHash.String(), err)
+					continue
+				}
+			} else {
+				log.Printf("Warning: Failed to marshal MetaInfo for torrent %s: %v", torrent.InfoHash.String(), err)
 				continue
 			}
 		}
@@ -321,7 +330,7 @@ func restoreSessionState(manager *rpc.TorrentManager, pers persistence.TorrentPe
 func saveSessionState(ctx context.Context, manager *rpc.TorrentManager, pers persistence.TorrentPersistence) error {
 	// Get current session configuration
 	sessionConfig := manager.GetSessionConfig()
-	if err := pers.SaveSessionConfig(ctx, sessionConfig); err != nil {
+	if err := pers.SaveSessionConfig(ctx, &sessionConfig); err != nil {
 		return fmt.Errorf("failed to save session config: %w", err)
 	}
 
