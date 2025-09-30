@@ -184,7 +184,7 @@ func (mm *MetadataManager) SetMetadata(request *MetadataRequest) *MetadataRespon
 	}
 
 	start := time.Now()
-	
+
 	mm.mu.Lock()
 	defer func() {
 		mm.metrics.TotalOperations++
