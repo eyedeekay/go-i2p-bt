@@ -277,15 +277,6 @@ func (hm *HookManager) executeHooksAsync(hookCtx *HookContext, hooks []*Hook) {
 
 	for _, hook := range hooks {
 		func(h *Hook) {
-			defer func() {
-				if r := recover(); r != nil {
-					hm.mu.Lock()
-					hm.metrics.TotalErrors++
-					hm.mu.Unlock()
-					hm.logger("Hook '%s' panicked: %v", h.ID, r)
-				}
-			}()
-
 			// Create context with timeout
 			ctx, cancel := context.WithTimeout(hookCtx.Context, h.Timeout)
 			defer cancel()
@@ -297,6 +288,15 @@ func (hm *HookManager) executeHooksAsync(hookCtx *HookContext, hooks []*Hook) {
 			// Execute hook with timeout
 			done := make(chan error, 1)
 			go func() {
+				defer func() {
+					if r := recover(); r != nil {
+						hm.mu.Lock()
+						hm.metrics.TotalErrors++
+						hm.mu.Unlock()
+						hm.logger("Hook '%s' panicked: %v", h.ID, r)
+						done <- fmt.Errorf("hook panicked: %v", r)
+					}
+				}()
 				done <- h.Callback(&hookCtxCopy)
 			}()
 
