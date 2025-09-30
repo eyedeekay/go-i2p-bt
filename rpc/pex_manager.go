@@ -190,50 +190,64 @@ func (pex *PEXManager) ProcessPEXMessage(torrentID string, msg *peerprotocol.UtP
 		return
 	}
 
-	// Process added IPv4 peers
-	for i, peer := range msg.Added {
+	pex.processAddedIPv4Peers(torrentID, msg.Added, msg.AddedF, callback)
+	pex.processAddedIPv6Peers(torrentID, msg.Added6, msg.Added6F, callback)
+	pex.processDroppedPeers(torrentID, msg.Dropped, msg.Dropped6)
+}
+
+// processAddedIPv4Peers processes added IPv4 peers from a PEX message
+func (pex *PEXManager) processAddedIPv4Peers(torrentID string, added []peerprotocol.CompactPeer, flags []byte, callback func(string, net.IP, uint16)) {
+	for i, peer := range added {
 		ip := net.IP([]byte(peer.IP)) // Convert CompactIP to net.IP
-		if ip != nil && isValidIP(ip) {
-			var flags byte
-			if i < len(msg.AddedF) {
-				flags = msg.AddedF[i]
-			}
-			pex.AddPeer(torrentID, ip, peer.Port, flags)
-			if callback != nil {
-				callback(torrentID, ip, peer.Port)
-			}
+		if pex.processValidPeer(torrentID, ip, peer.Port, flags, i, callback) {
+			continue
 		}
 	}
+}
 
-	// Process added IPv6 peers
-	for i, peer := range msg.Added6 {
+// processAddedIPv6Peers processes added IPv6 peers from a PEX message
+func (pex *PEXManager) processAddedIPv6Peers(torrentID string, added6 []peerprotocol.CompactPeer, flags6 []byte, callback func(string, net.IP, uint16)) {
+	for i, peer := range added6 {
 		ip := net.IP([]byte(peer.IP)) // Convert CompactIP to net.IP
-		if ip != nil && isValidIP(ip) {
-			var flags byte
-			if i < len(msg.Added6F) {
-				flags = msg.Added6F[i]
-			}
-			pex.AddPeer(torrentID, ip, peer.Port, flags)
-			if callback != nil {
-				callback(torrentID, ip, peer.Port)
-			}
+		if pex.processValidPeer(torrentID, ip, peer.Port, flags6, i, callback) {
+			continue
 		}
 	}
+}
 
-	// Process dropped peers
-	for _, peer := range msg.Dropped {
+// processDroppedPeers processes dropped peers from a PEX message
+func (pex *PEXManager) processDroppedPeers(torrentID string, dropped, dropped6 []peerprotocol.CompactPeer) {
+	for _, peer := range dropped {
 		ip := net.IP([]byte(peer.IP)) // Convert CompactIP to net.IP
 		if ip != nil {
 			pex.RemovePeer(torrentID, ip, peer.Port)
 		}
 	}
 
-	for _, peer := range msg.Dropped6 {
+	for _, peer := range dropped6 {
 		ip := net.IP([]byte(peer.IP)) // Convert CompactIP to net.IP
 		if ip != nil {
 			pex.RemovePeer(torrentID, ip, peer.Port)
 		}
 	}
+}
+
+// processValidPeer validates and processes a single peer entry
+func (pex *PEXManager) processValidPeer(torrentID string, ip net.IP, port uint16, flags []byte, index int, callback func(string, net.IP, uint16)) bool {
+	if ip == nil || !isValidIP(ip) {
+		return false
+	}
+
+	var peerFlags byte
+	if index < len(flags) {
+		peerFlags = flags[index]
+	}
+
+	pex.AddPeer(torrentID, ip, port, peerFlags)
+	if callback != nil {
+		callback(torrentID, ip, port)
+	}
+	return true
 }
 
 // GetPeerCount returns the number of peers tracked for a torrent
