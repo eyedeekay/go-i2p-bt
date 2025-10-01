@@ -127,61 +127,74 @@ func (pex *PEXManager) GetPEXMessage(torrentID string) (*peerprotocol.UtPexExten
 	pex.mu.Lock()
 	defer pex.mu.Unlock()
 
-	lastUpdate, exists := pex.lastUpdate[torrentID]
-	if !exists {
-		lastUpdate = time.Time{} // Beginning of time for first message
-	}
-
+	lastUpdate := pex.getLastUpdateTime(torrentID)
 	now := time.Now()
 	msg := &peerprotocol.UtPexExtendedMsg{}
 
-	// Get peers for this torrent
 	torrentPeers := pex.peers[torrentID]
 	if torrentPeers == nil {
 		pex.lastUpdate[torrentID] = now
 		return msg, nil // Empty message
 	}
 
-	// Find added peers since last update
-	for _, peer := range torrentPeers {
-		if peer.Added.After(lastUpdate) {
-			compactPeer := peerprotocol.CompactPeer{
-				IP:   peerprotocol.CompactIP(peer.IP),
-				Port: peer.Port,
-			}
-
-			if isIPv6(peer.IP) {
-				msg.Added6 = append(msg.Added6, compactPeer)
-				msg.Added6F = append(msg.Added6F, peer.Flags)
-			} else {
-				msg.Added = append(msg.Added, compactPeer)
-				msg.AddedF = append(msg.AddedF, peer.Flags)
-			}
-		}
-	}
-
-	// Clean up expired peers (dropped)
-	cutoff := now.Add(-5 * time.Minute) // Consider peers stale after 5 minutes
-	for peerID, peer := range torrentPeers {
-		if peer.LastSeen.Before(cutoff) {
-			compactPeer := peerprotocol.CompactPeer{
-				IP:   peerprotocol.CompactIP(peer.IP),
-				Port: peer.Port,
-			}
-
-			if isIPv6(peer.IP) {
-				msg.Dropped6 = append(msg.Dropped6, compactPeer)
-			} else {
-				msg.Dropped = append(msg.Dropped, compactPeer)
-			}
-
-			// Remove the expired peer
-			delete(torrentPeers, peerID)
-		}
-	}
+	pex.addNewPeersToMessage(msg, torrentPeers, lastUpdate)
+	pex.cleanupExpiredPeers(msg, torrentPeers, now)
 
 	pex.lastUpdate[torrentID] = now
 	return msg, nil
+}
+
+// getLastUpdateTime retrieves the last update time for a torrent, defaulting to zero time if not found
+func (pex *PEXManager) getLastUpdateTime(torrentID string) time.Time {
+	lastUpdate, exists := pex.lastUpdate[torrentID]
+	if !exists {
+		lastUpdate = time.Time{} // Beginning of time for first message
+	}
+	return lastUpdate
+}
+
+// addNewPeersToMessage adds peers that were added since the last update to the PEX message
+func (pex *PEXManager) addNewPeersToMessage(msg *peerprotocol.UtPexExtendedMsg, torrentPeers map[string]*PEXPeer, lastUpdate time.Time) {
+	for _, peer := range torrentPeers {
+		if peer.Added.After(lastUpdate) {
+			pex.addPeerToMessage(msg, peer, true)
+		}
+	}
+}
+
+// cleanupExpiredPeers removes stale peers and adds them to the dropped list in the PEX message
+func (pex *PEXManager) cleanupExpiredPeers(msg *peerprotocol.UtPexExtendedMsg, torrentPeers map[string]*PEXPeer, now time.Time) {
+	cutoff := now.Add(-5 * time.Minute) // Consider peers stale after 5 minutes
+	for peerID, peer := range torrentPeers {
+		if peer.LastSeen.Before(cutoff) {
+			pex.addPeerToMessage(msg, peer, false)
+			delete(torrentPeers, peerID)
+		}
+	}
+}
+
+// addPeerToMessage adds a peer to the appropriate section of the PEX message based on IP version
+func (pex *PEXManager) addPeerToMessage(msg *peerprotocol.UtPexExtendedMsg, peer *PEXPeer, isAdded bool) {
+	compactPeer := peerprotocol.CompactPeer{
+		IP:   peerprotocol.CompactIP(peer.IP),
+		Port: peer.Port,
+	}
+
+	if isIPv6(peer.IP) {
+		if isAdded {
+			msg.Added6 = append(msg.Added6, compactPeer)
+			msg.Added6F = append(msg.Added6F, peer.Flags)
+		} else {
+			msg.Dropped6 = append(msg.Dropped6, compactPeer)
+		}
+	} else {
+		if isAdded {
+			msg.Added = append(msg.Added, compactPeer)
+			msg.AddedF = append(msg.AddedF, peer.Flags)
+		} else {
+			msg.Dropped = append(msg.Dropped, compactPeer)
+		}
+	}
 }
 
 // ProcessPEXMessage processes an incoming PEX message from a peer

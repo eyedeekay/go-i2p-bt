@@ -228,6 +228,28 @@ func (ws *WebSeedManager) DownloadPieceData(ctx context.Context, torrentID strin
 
 // downloadFromSeed downloads data from a specific webseed
 func (ws *WebSeedManager) downloadFromSeed(ctx context.Context, torrentID string, seed *WebSeed, pieceIndex int, pieceLength int64, fileName string) ([]byte, error) {
+	requestURL, err := ws.buildRequestURL(seed, fileName)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := ws.createHTTPRequest(ctx, requestURL, pieceIndex, pieceLength)
+	if err != nil {
+		return nil, err
+	}
+
+	ws.recordAttemptTime(torrentID, seed.URL)
+
+	data, err := ws.executeRequest(req, pieceLength)
+	if err != nil {
+		return nil, err
+	}
+
+	return data, nil
+}
+
+// buildRequestURL constructs the appropriate request URL based on webseed type
+func (ws *WebSeedManager) buildRequestURL(seed *WebSeed, fileName string) (string, error) {
 	var requestURL string
 
 	switch seed.Type {
@@ -243,9 +265,14 @@ func (ws *WebSeedManager) downloadFromSeed(ctx context.Context, torrentID string
 		// URL includes file path
 		requestURL = seed.URL
 	default:
-		return nil, fmt.Errorf("unsupported webseed type: %s", seed.Type)
+		return "", fmt.Errorf("unsupported webseed type: %s", seed.Type)
 	}
 
+	return requestURL, nil
+}
+
+// createHTTPRequest creates and configures an HTTP request for piece download
+func (ws *WebSeedManager) createHTTPRequest(ctx context.Context, requestURL string, pieceIndex int, pieceLength int64) (*http.Request, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", requestURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %v", err)
@@ -261,19 +288,26 @@ func (ws *WebSeedManager) downloadFromSeed(ctx context.Context, torrentID string
 	// Set Range header for partial content
 	req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", startByte, endByte))
 
-	// Record attempt time
+	return req, nil
+}
+
+// recordAttemptTime updates the last attempted time for a webseed
+func (ws *WebSeedManager) recordAttemptTime(torrentID, seedURL string) {
 	ws.mu.Lock()
+	defer ws.mu.Unlock()
+
 	if seeds := ws.webSeeds[torrentID]; seeds != nil {
 		for _, s := range seeds {
-			if s.URL == seed.URL {
+			if s.URL == seedURL {
 				s.LastTried = time.Now()
 				break
 			}
 		}
 	}
-	ws.mu.Unlock()
+}
 
-	// Make the request
+// executeRequest performs the HTTP request and validates the response
+func (ws *WebSeedManager) executeRequest(req *http.Request, expectedLength int64) ([]byte, error) {
 	resp, err := ws.client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("HTTP request failed: %v", err)
@@ -292,8 +326,8 @@ func (ws *WebSeedManager) downloadFromSeed(ctx context.Context, torrentID string
 	}
 
 	// Verify the length
-	if int64(len(data)) != pieceLength {
-		return nil, fmt.Errorf("received %d bytes, expected %d", len(data), pieceLength)
+	if int64(len(data)) != expectedLength {
+		return nil, fmt.Errorf("received %d bytes, expected %d", len(data), expectedLength)
 	}
 
 	return data, nil
