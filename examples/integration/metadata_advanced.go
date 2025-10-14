@@ -185,25 +185,57 @@ func (me *MetadataExtensions) UpdateCommunityRating(torrentID int64, rating floa
 	return me.setMetadata(torrentID, "quality", qualityData, "community_rating", []string{"quality", "rating"})
 }
 
+// GetHighestRatedTorrents returns torrent IDs with community ratings above minRating,
+// sorted by rating in descending order and limited to the specified count.
 func (me *MetadataExtensions) GetHighestRatedTorrents(minRating float64, limit int) []int64 {
-	type ratedTorrent struct {
-		ID     int64
-		Rating float64
-	}
+	rated := me.collectRatedTorrents(minRating)
+	sortTorrentsByRating(rated)
+	return extractTopTorrentIDs(rated, limit)
+}
 
+// ratedTorrent represents a torrent with its associated rating.
+type ratedTorrent struct {
+	ID     int64
+	Rating float64
+}
+
+// collectRatedTorrents gathers all torrents with ratings at or above the minimum threshold.
+// It iterates through all torrents and extracts their community ratings from quality metadata.
+func (me *MetadataExtensions) collectRatedTorrents(minRating float64) []ratedTorrent {
 	var rated []ratedTorrent
 
 	for _, torrentID := range me.getAllTorrentIDs() {
-		if qualityData, exists := me.getMetadata(torrentID, "quality"); exists {
-			if qualityMap, ok := qualityData.(map[string]interface{}); ok {
-				if rating, ok := qualityMap["community_rating"].(float64); ok && rating >= minRating {
-					rated = append(rated, ratedTorrent{ID: torrentID, Rating: rating})
-				}
-			}
+		if rating, ok := me.extractTorrentRating(torrentID); ok && rating >= minRating {
+			rated = append(rated, ratedTorrent{ID: torrentID, Rating: rating})
 		}
 	}
 
-	// Simple sort by rating (descending)
+	return rated
+}
+
+// extractTorrentRating retrieves the community rating for a specific torrent.
+// Returns the rating and true if found, or 0.0 and false if not available.
+func (me *MetadataExtensions) extractTorrentRating(torrentID int64) (float64, bool) {
+	qualityData, exists := me.getMetadata(torrentID, "quality")
+	if !exists {
+		return 0.0, false
+	}
+
+	qualityMap, ok := qualityData.(map[string]interface{})
+	if !ok {
+		return 0.0, false
+	}
+
+	rating, ok := qualityMap["community_rating"].(float64)
+	if !ok {
+		return 0.0, false
+	}
+
+	return rating, true
+}
+
+// sortTorrentsByRating sorts the rated torrents by rating in descending order using bubble sort.
+func sortTorrentsByRating(rated []ratedTorrent) {
 	for i := 0; i < len(rated)-1; i++ {
 		for j := i + 1; j < len(rated); j++ {
 			if rated[i].Rating < rated[j].Rating {
@@ -211,8 +243,10 @@ func (me *MetadataExtensions) GetHighestRatedTorrents(minRating float64, limit i
 			}
 		}
 	}
+}
 
-	// Return up to limit results
+// extractTopTorrentIDs extracts torrent IDs from the rated list up to the specified limit.
+func extractTopTorrentIDs(rated []ratedTorrent, limit int) []int64 {
 	var result []int64
 	for i, rt := range rated {
 		if i >= limit {
@@ -220,7 +254,6 @@ func (me *MetadataExtensions) GetHighestRatedTorrents(minRating float64, limit i
 		}
 		result = append(result, rt.ID)
 	}
-
 	return result
 }
 
