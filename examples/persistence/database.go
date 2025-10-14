@@ -101,7 +101,7 @@ func (dp *DatabasePersistence) SaveTorrent(ctx context.Context, torrent *rpc.Tor
 		if bucket == nil {
 			return fmt.Errorf("torrents bucket not found")
 		}
-		
+
 		return bucket.Put([]byte(torrent.InfoHash.String()), jsonData)
 	})
 }
@@ -109,21 +109,21 @@ func (dp *DatabasePersistence) SaveTorrent(ctx context.Context, torrent *rpc.Tor
 // LoadTorrent retrieves a torrent's state by info hash
 func (dp *DatabasePersistence) LoadTorrent(ctx context.Context, infoHash metainfo.Hash) (*rpc.TorrentState, error) {
 	var torrent rpc.TorrentState
-	
+
 	err := dp.db.View(func(tx *bbolt.Tx) error {
 		bucket := tx.Bucket([]byte("torrents"))
 		if bucket == nil {
 			return fmt.Errorf("torrents bucket not found")
 		}
-		
+
 		jsonData := bucket.Get([]byte(infoHash.String()))
 		if jsonData == nil {
 			return fmt.Errorf("torrent not found: %s", infoHash.String())
 		}
-		
+
 		return json.Unmarshal(jsonData, &torrent)
 	})
-	
+
 	if err != nil {
 		return nil, err
 	}
@@ -133,8 +133,6 @@ func (dp *DatabasePersistence) LoadTorrent(ctx context.Context, infoHash metainf
 
 	return &torrent, nil
 }
-
-
 
 // SaveAllTorrents persists the state of multiple torrents atomically using a transaction
 func (dp *DatabasePersistence) SaveAllTorrents(ctx context.Context, torrents []*rpc.TorrentState) error {
@@ -147,23 +145,23 @@ func (dp *DatabasePersistence) SaveAllTorrents(ctx context.Context, torrents []*
 		if bucket == nil {
 			return fmt.Errorf("torrents bucket not found")
 		}
-		
+
 		for _, torrent := range torrents {
 			if torrent == nil {
 				return fmt.Errorf("torrent cannot be nil")
 			}
-			
+
 			torrentData := dp.createSerializableTorrent(torrent)
 			jsonData, err := json.Marshal(torrentData)
 			if err != nil {
 				return fmt.Errorf("failed to marshal torrent %s: %w", torrent.InfoHash.String(), err)
 			}
-			
+
 			if err := bucket.Put([]byte(torrent.InfoHash.String()), jsonData); err != nil {
 				return fmt.Errorf("failed to save torrent %s: %w", torrent.InfoHash.String(), err)
 			}
 		}
-		
+
 		return nil
 	})
 }
@@ -171,28 +169,28 @@ func (dp *DatabasePersistence) SaveAllTorrents(ctx context.Context, torrents []*
 // LoadAllTorrents retrieves all persisted torrent states
 func (dp *DatabasePersistence) LoadAllTorrents(ctx context.Context) ([]*rpc.TorrentState, error) {
 	var torrents []*rpc.TorrentState
-	
+
 	err := dp.db.View(func(tx *bbolt.Tx) error {
 		bucket := tx.Bucket([]byte("torrents"))
 		if bucket == nil {
 			return fmt.Errorf("torrents bucket not found")
 		}
-		
+
 		return bucket.ForEach(func(k, v []byte) error {
 			var torrent rpc.TorrentState
 			if err := json.Unmarshal(v, &torrent); err != nil {
 				// Skip corrupted records
 				return nil
 			}
-			
+
 			// Set info hash from key
 			torrent.InfoHash = metainfo.NewHashFromString(string(k))
 			torrents = append(torrents, &torrent)
-			
+
 			return nil
 		})
 	})
-	
+
 	if err != nil {
 		return nil, err
 	}
@@ -207,12 +205,12 @@ func (dp *DatabasePersistence) DeleteTorrent(ctx context.Context, infoHash metai
 		if bucket == nil {
 			return fmt.Errorf("torrents bucket not found")
 		}
-		
+
 		// Check if torrent exists first
 		if bucket.Get([]byte(infoHash.String())) == nil {
 			return fmt.Errorf("torrent not found: %s", infoHash.String())
 		}
-		
+
 		return bucket.Delete([]byte(infoHash.String()))
 	})
 }
@@ -233,7 +231,7 @@ func (dp *DatabasePersistence) SaveSessionConfig(ctx context.Context, config *rp
 		if bucket == nil {
 			return fmt.Errorf("session bucket not found")
 		}
-		
+
 		return bucket.Put([]byte("config"), jsonData)
 	})
 }
@@ -241,21 +239,21 @@ func (dp *DatabasePersistence) SaveSessionConfig(ctx context.Context, config *rp
 // LoadSessionConfig retrieves persisted session configuration
 func (dp *DatabasePersistence) LoadSessionConfig(ctx context.Context) (*rpc.SessionConfiguration, error) {
 	var config rpc.SessionConfiguration
-	
+
 	err := dp.db.View(func(tx *bbolt.Tx) error {
 		bucket := tx.Bucket([]byte("session"))
 		if bucket == nil {
 			return fmt.Errorf("session bucket not found")
 		}
-		
+
 		jsonData := bucket.Get([]byte("config"))
 		if jsonData == nil {
 			return fmt.Errorf("session configuration not found")
 		}
-		
+
 		return json.Unmarshal(jsonData, &config)
 	})
-	
+
 	if err != nil {
 		return nil, err
 	}
@@ -275,19 +273,19 @@ func (dp *DatabasePersistence) initBuckets() error {
 		if _, err := tx.CreateBucketIfNotExists([]byte("torrents")); err != nil {
 			return fmt.Errorf("failed to create torrents bucket: %w", err)
 		}
-		
+
 		// Create session bucket
 		if _, err := tx.CreateBucketIfNotExists([]byte("session")); err != nil {
 			return fmt.Errorf("failed to create session bucket: %w", err)
 		}
-		
+
 		// Create metrics bucket if enabled
 		if dp.metricsEnabled {
 			if _, err := tx.CreateBucketIfNotExists([]byte("metrics")); err != nil {
 				return fmt.Errorf("failed to create metrics bucket: %w", err)
 			}
 		}
-		
+
 		return nil
 	})
 }

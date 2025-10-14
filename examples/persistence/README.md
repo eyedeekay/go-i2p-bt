@@ -175,7 +175,7 @@ Based on benchmark tests:
 |---------------|----------------|----------------|--------------|-------------------|
 | File          | ~1-5ms         | ~0.5-2ms       | Low          | Mutex-protected   |
 | Memory        | ~10-50ns       | ~10-50ns       | High         | Mutex-protected   |
-| Database      | ~0.1-1ms       | ~0.1-0.5ms     | Medium       | Connection pool   |
+| Database      | ~0.1-1ms       | ~0.1-0.5ms     | Medium       | MVCC (concurrent readers, single writer) |
 
 *Performance varies based on torrent count, system I/O, and hardware specifications.*
 
