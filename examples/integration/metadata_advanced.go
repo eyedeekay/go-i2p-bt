@@ -526,24 +526,60 @@ func (me *MetadataExtensions) collectCategoryStatistics(torrentIDs []int64) (map
 	tagStats := make(map[string]int)
 
 	for _, torrentID := range torrentIDs {
-		if categoryData, exists := me.getMetadata(torrentID, "category"); exists {
-			if catMap, ok := categoryData.(map[string]interface{}); ok {
-				if category, ok := catMap["category"].(string); ok {
-					categoryStats[category]++
-				}
-
-				if tags, ok := catMap["tags"].([]interface{}); ok {
-					for _, tag := range tags {
-						if tagStr, ok := tag.(string); ok {
-							tagStats[tagStr]++
-						}
-					}
-				}
-			}
-		}
+		me.processTorrentCategories(torrentID, categoryStats, tagStats)
 	}
 
 	return categoryStats, tagStats
+}
+
+// processTorrentCategories extracts and counts category and tag data for a single torrent.
+// Updates the provided category and tag statistics maps in place.
+func (me *MetadataExtensions) processTorrentCategories(torrentID int64, categoryStats, tagStats map[string]int) {
+	categoryData, exists := me.getMetadata(torrentID, "category")
+	if !exists {
+		return
+	}
+
+	catMap := extractCategoryMap(categoryData)
+	if catMap == nil {
+		return
+	}
+
+	incrementCategoryCount(catMap, categoryStats)
+	incrementTagCounts(catMap, tagStats)
+}
+
+// extractCategoryMap converts metadata to a category map with type validation.
+// Returns nil if the data cannot be converted to the expected map type.
+func extractCategoryMap(categoryData interface{}) map[string]interface{} {
+	catMap, ok := categoryData.(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	return catMap
+}
+
+// incrementCategoryCount extracts the category name from the map and increments its count.
+func incrementCategoryCount(catMap map[string]interface{}, categoryStats map[string]int) {
+	category, ok := catMap["category"].(string)
+	if ok {
+		categoryStats[category]++
+	}
+}
+
+// incrementTagCounts extracts tags from the category map and increments their counts.
+// Handles the tags slice type assertion and iterates through individual tag strings.
+func incrementTagCounts(catMap map[string]interface{}, tagStats map[string]int) {
+	tags, ok := catMap["tags"].([]interface{})
+	if !ok {
+		return
+	}
+
+	for _, tag := range tags {
+		if tagStr, ok := tag.(string); ok {
+			tagStats[tagStr]++
+		}
+	}
 }
 
 // formatCategoryReport formats category and tag statistics into a readable report section.
