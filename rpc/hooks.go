@@ -126,6 +126,26 @@ func (hm *HookManager) SetDefaultTimeout(timeout time.Duration) {
 // RegisterHook registers a new hook for torrent lifecycle events
 // Returns the hook ID for later reference
 func (hm *HookManager) RegisterHook(hook *Hook) error {
+	if err := validateHookInput(hook); err != nil {
+		return err
+	}
+
+	hm.mu.Lock()
+	defer hm.mu.Unlock()
+
+	configureHookDefaults(hook, hm.defaultTimeout)
+
+	if err := hm.registerHookForEvents(hook); err != nil {
+		return err
+	}
+
+	hm.logger("Registered hook '%s' for events: %v", hook.ID, hook.Events)
+	return nil
+}
+
+// validateHookInput checks if the hook has valid required fields.
+// Returns an error if the hook is nil, has an empty ID, or has a nil callback.
+func validateHookInput(hook *Hook) error {
 	if hook == nil {
 		return fmt.Errorf("hook cannot be nil")
 	}
@@ -135,40 +155,69 @@ func (hm *HookManager) RegisterHook(hook *Hook) error {
 	if hook.Callback == nil {
 		return fmt.Errorf("hook callback cannot be nil")
 	}
+	return nil
+}
 
-	hm.mu.Lock()
-	defer hm.mu.Unlock()
-
-	// Set default timeout if not specified
+// configureHookDefaults sets default values for hook configuration.
+// If the hook timeout is not specified (zero), it sets it to the manager's default timeout.
+func configureHookDefaults(hook *Hook, defaultTimeout time.Duration) {
 	if hook.Timeout == 0 {
-		hook.Timeout = hm.defaultTimeout
+		hook.Timeout = defaultTimeout
 	}
+}
 
-	// Register for specific events or as global hook
+// registerHookForEvents registers the hook for its specified events or as a global hook.
+// If no events are specified, the hook becomes a global hook responding to all events.
+// Returns an error if a hook with the same ID is already registered for any of the events.
+func (hm *HookManager) registerHookForEvents(hook *Hook) error {
 	if len(hook.Events) == 0 {
-		// Global hook - responds to all events
-		hm.globalHooks = append(hm.globalHooks, hook)
-		hm.sortHooksByPriority(hm.globalHooks)
-	} else {
-		// Event-specific hooks
-		for _, event := range hook.Events {
-			if hm.hooks[event] == nil {
-				hm.hooks[event] = make([]*Hook, 0)
-			}
+		return hm.registerGlobalHook(hook)
+	}
+	return hm.registerEventSpecificHooks(hook)
+}
 
-			// Check for duplicate hook IDs
-			for _, existingHook := range hm.hooks[event] {
-				if existingHook.ID == hook.ID {
-					return fmt.Errorf("hook with ID '%s' already registered for event '%s'", hook.ID, event)
-				}
-			}
+// registerGlobalHook adds a hook to the global hooks list that responds to all events.
+func (hm *HookManager) registerGlobalHook(hook *Hook) error {
+	hm.globalHooks = append(hm.globalHooks, hook)
+	hm.sortHooksByPriority(hm.globalHooks)
+	return nil
+}
 
-			hm.hooks[event] = append(hm.hooks[event], hook)
-			hm.sortHooksByPriority(hm.hooks[event])
+// registerEventSpecificHooks registers a hook for each of its specified events.
+// Returns an error if a hook with the same ID already exists for any event.
+func (hm *HookManager) registerEventSpecificHooks(hook *Hook) error {
+	for _, event := range hook.Events {
+		if err := hm.registerHookForSingleEvent(hook, event); err != nil {
+			return err
 		}
 	}
+	return nil
+}
 
-	hm.logger("Registered hook '%s' for events: %v", hook.ID, hook.Events)
+// registerHookForSingleEvent registers a hook for a single event type.
+// Initializes the event's hook list if needed and checks for duplicate hook IDs.
+func (hm *HookManager) registerHookForSingleEvent(hook *Hook, event HookEvent) error {
+	if hm.hooks[event] == nil {
+		hm.hooks[event] = make([]*Hook, 0)
+	}
+
+	if err := checkDuplicateHook(hm.hooks[event], hook.ID, event); err != nil {
+		return err
+	}
+
+	hm.hooks[event] = append(hm.hooks[event], hook)
+	hm.sortHooksByPriority(hm.hooks[event])
+	return nil
+}
+
+// checkDuplicateHook verifies that no hook with the given ID already exists for the event.
+// Returns an error if a duplicate is found.
+func checkDuplicateHook(hooks []*Hook, hookID string, event HookEvent) error {
+	for _, existingHook := range hooks {
+		if existingHook.ID == hookID {
+			return fmt.Errorf("hook with ID '%s' already registered for event '%s'", hookID, event)
+		}
+	}
 	return nil
 }
 
