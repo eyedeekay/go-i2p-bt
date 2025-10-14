@@ -683,24 +683,64 @@ func (me *MetadataExtensions) collectDownloadStatusStatistics(torrentIDs []int64
 	}
 
 	for _, torrentID := range torrentIDs {
-		if trackingData, exists := me.getMetadata(torrentID, "tracking"); exists {
-			if trackingMap, ok := trackingData.(map[string]interface{}); ok {
-				if _, hasComplete := trackingMap["download_complete"]; hasComplete {
-					statusStats["completed"]++
-				} else {
-					if retries, ok := trackingMap["retry_count"].(float64); ok && retries > 0 {
-						statusStats["errored"]++
-					} else if retries, ok := trackingMap["retry_count"].(int); ok && retries > 0 {
-						statusStats["errored"]++
-					} else {
-						statusStats["in_progress"]++
-					}
-				}
-			}
-		}
+		processTorrentDownloadStatus(me, torrentID, statusStats)
 	}
 
 	return statusStats
+}
+
+// processTorrentDownloadStatus determines and records the download status for a single torrent.
+// Updates the status statistics map in place based on the torrent's tracking metadata.
+func processTorrentDownloadStatus(me *MetadataExtensions, torrentID int64, statusStats map[string]int) {
+	trackingMap, found := extractTrackingMap(me, torrentID)
+	if !found {
+		return
+	}
+
+	status := determineDownloadStatus(trackingMap)
+	statusStats[status]++
+}
+
+// extractTrackingMap retrieves and validates the tracking metadata for a torrent.
+// Returns the tracking map and true if found, or nil and false if not available.
+func extractTrackingMap(me *MetadataExtensions, torrentID int64) (map[string]interface{}, bool) {
+	trackingData, exists := me.getMetadata(torrentID, "tracking")
+	if !exists {
+		return nil, false
+	}
+
+	trackingMap, ok := trackingData.(map[string]interface{})
+	if !ok {
+		return nil, false
+	}
+
+	return trackingMap, true
+}
+
+// determineDownloadStatus analyzes tracking data to determine the current download status.
+// Returns "completed" if download is finished, "errored" if retries exist, or "in_progress" otherwise.
+func determineDownloadStatus(trackingMap map[string]interface{}) string {
+	if _, hasComplete := trackingMap["download_complete"]; hasComplete {
+		return "completed"
+	}
+
+	if hasRetryErrors(trackingMap) {
+		return "errored"
+	}
+
+	return "in_progress"
+}
+
+// hasRetryErrors checks if the tracking data indicates retry attempts due to errors.
+// Handles both float64 and int representations of the retry_count field.
+func hasRetryErrors(trackingMap map[string]interface{}) bool {
+	if retries, ok := trackingMap["retry_count"].(float64); ok && retries > 0 {
+		return true
+	}
+	if retries, ok := trackingMap["retry_count"].(int); ok && retries > 0 {
+		return true
+	}
+	return false
 }
 
 // formatDownloadStatusReport formats download status statistics into a readable report section.
