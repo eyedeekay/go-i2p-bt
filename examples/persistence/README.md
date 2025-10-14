@@ -63,32 +63,31 @@ memPersistence := persistence.NewMemoryPersistence(backupPersistence, 5*time.Min
 
 ### 3. Database Persistence (`database.go`)
 
-SQLite-based persistence for production deployments requiring ACID guarantees.
+bbolt (BoltDB)-based persistence for production deployments requiring ACID guarantees.
 
 **Features:**
 - ACID transactions for data consistency
-- SQL queries for reporting and analytics
-- Connection pooling for concurrent access
-- Prepared statements for performance
+- Embedded key-value storage (no external dependencies)
+- MVCC for concurrent readers with single-writer transactions
+- Automatic bucket initialization
 - Optional metrics tracking with retention policies
-- Automatic schema migration
+- No CGO dependencies (pure Go)
 
 **Best for:**
 - Production deployments
-- Applications requiring complex queries
-- Multi-process deployments
-- Systems needing backup/restore capabilities
-- Applications with compliance requirements
+- Applications requiring embedded database
+- Single-process or multi-threaded deployments
+- Systems needing simple key-value storage
+- Applications requiring reliable persistence without database servers
 
 **Setup:**
 ```bash
-# Add SQLite dependency to your go.mod
-go get github.com/mattn/go-sqlite3
+# Add bbolt dependency to your go.mod
+go get go.etcd.io/bbolt
 ```
 
 **Usage:**
 ```go
-// Uncomment the SQLite import in database.go first
 persistence, err := persistence.NewDatabasePersistence("/data/torrents.db", true)
 if err != nil {
     log.Fatal(err)
@@ -184,7 +183,7 @@ Based on benchmark tests:
 
 ### Security
 - File permissions: Ensure proper directory permissions (755 for directories, 644 for files)
-- Database security: Use appropriate SQLite pragma settings for production
+- Database security: bbolt files should have restricted permissions (0600)
 - Backup encryption: Consider encrypting backup files for sensitive data
 
 ### Monitoring
@@ -195,12 +194,12 @@ Based on benchmark tests:
 ### Backup and Recovery
 - Implement regular backup strategies for critical data
 - Test restore procedures regularly
-- Consider using database WAL mode for better concurrency
+- bbolt supports online backups using Tx.WriteTo() method
 
 ### Scaling
 - File persistence: Consider sharding across multiple directories for large datasets
 - Memory persistence: Monitor memory usage and implement memory limits
-- Database persistence: Use database connection pooling and consider read replicas
+- Database persistence: bbolt is optimized for single-writer scenarios with concurrent readers
 
 ## Extending the Examples
 
@@ -216,7 +215,7 @@ To create custom persistence implementations:
 
 - **File persistence**: Standard library only
 - **Memory persistence**: Standard library only
-- **Database persistence**: Requires `github.com/mattn/go-sqlite3`
+- **Database persistence**: Requires `go.etcd.io/bbolt`
 
 For production use, consider adding:
 - Structured logging library (e.g., `logrus`, `zap`)

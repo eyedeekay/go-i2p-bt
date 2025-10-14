@@ -16,72 +16,56 @@ package persistence
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"time"
 
 	"github.com/go-i2p/go-i2p-bt/metainfo"
 	"github.com/go-i2p/go-i2p-bt/rpc"
-	// Import SQLite driver (uncomment and add to go.mod for production use)
-	// _ "github.com/mattn/go-sqlite3"
+	"go.etcd.io/bbolt"
 )
 
-// DatabasePersistence implements TorrentPersistence using SQLite database.
+// DatabasePersistence implements TorrentPersistence using bbolt (BoltDB) database.
 // This implementation is suitable for production deployments that need:
 //   - ACID transactions for data consistency
-//   - SQL queries for reporting and analytics
-//   - Concurrent access from multiple processes
-//   - Reliable persistence with backup/restore capabilities
+//   - Embedded key-value storage without external dependencies
+//   - Concurrent read access with single-writer transactions
+//   - Reliable persistence with crash recovery
 //
-// Schema:
-//   - torrents: Main torrent state table with JSON blob for flexible fields
-//   - session_config: Single-row table for session configuration
-//   - torrent_metrics: Optional table for historical metrics tracking
+// Buckets:
+//   - torrents: Main torrent state bucket with JSON values
+//   - session: Single-key bucket for session configuration
+//   - metrics: Optional bucket for historical metrics tracking
 //
 // Features:
-//   - Automatic schema migration
-//   - Transaction support for atomic operations
-//   - Connection pooling for concurrent access
-//   - Prepared statements for performance
+//   - Automatic bucket initialization
+//   - ACID transaction support for atomic operations
+//   - MVCC for concurrent readers
+//   - No external database dependencies
 //   - Optional metrics tracking with retention policies
 type DatabasePersistence struct {
-	db     *sql.DB
+	db     *bbolt.DB
 	dbPath string
-
-	// Prepared statements for performance
-	insertTorrent     *sql.Stmt
-	updateTorrent     *sql.Stmt
-	selectTorrent     *sql.Stmt
-	deleteTorrent     *sql.Stmt
-	selectAllTorrents *sql.Stmt
-
-	insertSession *sql.Stmt
-	selectSession *sql.Stmt
 
 	// Optional metrics support
 	metricsEnabled bool
-	insertMetrics  *sql.Stmt
 }
 
-// NewDatabasePersistence creates a new SQLite-based persistence implementation.
-// The database file will be created if it doesn't exist, and the schema will
-// be automatically migrated to the latest version.
+// NewDatabasePersistence creates a new bbolt-based persistence implementation.
+// The database file will be created if it doesn't exist, and the required buckets
+// will be automatically initialized.
 func NewDatabasePersistence(dbPath string, enableMetrics bool) (*DatabasePersistence, error) {
 	if dbPath == "" {
 		return nil, fmt.Errorf("database path cannot be empty")
 	}
 
-	// Open database connection
-	db, err := sql.Open("sqlite3", dbPath+"?_busy_timeout=10000&_journal_mode=WAL")
+	// Open database connection with default options
+	db, err := bbolt.Open(dbPath, 0600, &bbolt.Options{
+		Timeout: 1 * time.Second,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
-
-	// Configure connection pool
-	db.SetMaxOpenConns(10)
-	db.SetMaxIdleConns(5)
-	db.SetConnMaxLifetime(time.Hour)
 
 	dp := &DatabasePersistence{
 		db:             db,
@@ -89,15 +73,10 @@ func NewDatabasePersistence(dbPath string, enableMetrics bool) (*DatabasePersist
 		metricsEnabled: enableMetrics,
 	}
 
-	// Initialize schema and prepare statements
-	if err := dp.initSchema(); err != nil {
+	// Initialize buckets
+	if err := dp.initBuckets(); err != nil {
 		db.Close()
-		return nil, fmt.Errorf("failed to initialize schema: %w", err)
-	}
-
-	if err := dp.prepareStatements(); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("failed to prepare statements: %w", err)
+		return nil, fmt.Errorf("failed to initialize buckets: %w", err)
 	}
 
 	return dp, nil
@@ -116,63 +95,37 @@ func (dp *DatabasePersistence) SaveTorrent(ctx context.Context, torrent *rpc.Tor
 		return fmt.Errorf("failed to marshal torrent state: %w", err)
 	}
 
-	// Try update first, then insert if not exists
-	result, err := dp.updateTorrent.ExecContext(ctx,
-		jsonData,
-		torrent.Status,
-		torrent.PercentDone,
-		torrent.Downloaded,
-		torrent.Uploaded,
-		time.Now(),
-		torrent.InfoHash.String(),
-	)
-	if err != nil {
-		return fmt.Errorf("failed to update torrent: %w", err)
-	}
-
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("failed to get affected rows: %w", err)
-	}
-
-	// If no rows were updated, insert new record
-	if rowsAffected == 0 {
-		_, err = dp.insertTorrent.ExecContext(ctx,
-			torrent.InfoHash.String(),
-			jsonData,
-			torrent.Status,
-			torrent.PercentDone,
-			torrent.Downloaded,
-			torrent.Uploaded,
-			torrent.AddedDate,
-			time.Now(),
-		)
-		if err != nil {
-			return fmt.Errorf("failed to insert torrent: %w", err)
+	// Store in bbolt
+	return dp.db.Update(func(tx *bbolt.Tx) error {
+		bucket := tx.Bucket([]byte("torrents"))
+		if bucket == nil {
+			return fmt.Errorf("torrents bucket not found")
 		}
-	}
-
-	return nil
+		
+		return bucket.Put([]byte(torrent.InfoHash.String()), jsonData)
+	})
 }
 
 // LoadTorrent retrieves a torrent's state by info hash
 func (dp *DatabasePersistence) LoadTorrent(ctx context.Context, infoHash metainfo.Hash) (*rpc.TorrentState, error) {
-	var jsonData string
-	var addedDate, updatedDate time.Time
-
-	err := dp.selectTorrent.QueryRowContext(ctx, infoHash.String()).Scan(
-		&jsonData, &addedDate, &updatedDate,
-	)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("torrent not found: %s", infoHash.String())
-		}
-		return nil, fmt.Errorf("failed to query torrent: %w", err)
-	}
-
 	var torrent rpc.TorrentState
-	if err := json.Unmarshal([]byte(jsonData), &torrent); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal torrent state: %w", err)
+	
+	err := dp.db.View(func(tx *bbolt.Tx) error {
+		bucket := tx.Bucket([]byte("torrents"))
+		if bucket == nil {
+			return fmt.Errorf("torrents bucket not found")
+		}
+		
+		jsonData := bucket.Get([]byte(infoHash.String()))
+		if jsonData == nil {
+			return fmt.Errorf("torrent not found: %s", infoHash.String())
+		}
+		
+		return json.Unmarshal(jsonData, &torrent)
+	})
+	
+	if err != nil {
+		return nil, err
 	}
 
 	// Ensure info hash is set correctly
@@ -181,99 +134,7 @@ func (dp *DatabasePersistence) LoadTorrent(ctx context.Context, infoHash metainf
 	return &torrent, nil
 }
 
-// beginSaveTransaction initializes a database transaction with prepared statements
-// for atomic torrent persistence operations.
-func (dp *DatabasePersistence) beginSaveTransaction(ctx context.Context) (*sql.Tx, *sql.Stmt, *sql.Stmt, error) {
-	tx, err := dp.db.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to begin transaction: %w", err)
-	}
 
-	insertStmt := tx.StmtContext(ctx, dp.insertTorrent)
-	updateStmt := tx.StmtContext(ctx, dp.updateTorrent)
-
-	return tx, insertStmt, updateStmt, nil
-}
-
-// serializeTorrentData converts a torrent state to JSON format suitable for database storage.
-func (dp *DatabasePersistence) serializeTorrentData(torrent *rpc.TorrentState) ([]byte, error) {
-	torrentData := dp.createSerializableTorrent(torrent)
-	jsonData, err := json.Marshal(torrentData)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal torrent %s: %w", torrent.InfoHash.String(), err)
-	}
-	return jsonData, nil
-}
-
-// upsertTorrentInTransaction performs an update-or-insert operation for a single torrent
-// within the provided transaction context.
-func (dp *DatabasePersistence) upsertTorrentInTransaction(
-	ctx context.Context,
-	updateStmt, insertStmt *sql.Stmt,
-	torrent *rpc.TorrentState,
-	jsonData []byte,
-) error {
-	// Try update first
-	result, err := updateStmt.ExecContext(ctx,
-		jsonData,
-		torrent.Status,
-		torrent.PercentDone,
-		torrent.Downloaded,
-		torrent.Uploaded,
-		time.Now(),
-		torrent.InfoHash.String(),
-	)
-	if err != nil {
-		return fmt.Errorf("failed to update torrent %s: %w", torrent.InfoHash.String(), err)
-	}
-
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("failed to get affected rows for %s: %w", torrent.InfoHash.String(), err)
-	}
-
-	// Insert if update didn't affect any rows
-	if rowsAffected == 0 {
-		_, err = insertStmt.ExecContext(ctx,
-			torrent.InfoHash.String(),
-			jsonData,
-			torrent.Status,
-			torrent.PercentDone,
-			torrent.Downloaded,
-			torrent.Uploaded,
-			torrent.AddedDate,
-			time.Now(),
-		)
-		if err != nil {
-			return fmt.Errorf("failed to insert torrent %s: %w", torrent.InfoHash.String(), err)
-		}
-	}
-
-	return nil
-}
-
-// processTorrentsInTransaction iterates through torrents and persists each one within a transaction.
-func (dp *DatabasePersistence) processTorrentsInTransaction(
-	ctx context.Context,
-	updateStmt, insertStmt *sql.Stmt,
-	torrents []*rpc.TorrentState,
-) error {
-	for _, torrent := range torrents {
-		if torrent == nil {
-			return fmt.Errorf("torrent cannot be nil")
-		}
-
-		jsonData, err := dp.serializeTorrentData(torrent)
-		if err != nil {
-			return err
-		}
-
-		if err := dp.upsertTorrentInTransaction(ctx, updateStmt, insertStmt, torrent, jsonData); err != nil {
-			return err
-		}
-	}
-	return nil
-}
 
 // SaveAllTorrents persists the state of multiple torrents atomically using a transaction
 func (dp *DatabasePersistence) SaveAllTorrents(ctx context.Context, torrents []*rpc.TorrentState) error {
@@ -281,54 +142,59 @@ func (dp *DatabasePersistence) SaveAllTorrents(ctx context.Context, torrents []*
 		return nil
 	}
 
-	tx, insertStmt, updateStmt, err := dp.beginSaveTransaction(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	if err := dp.processTorrentsInTransaction(ctx, updateStmt, insertStmt, torrents); err != nil {
-		return err
-	}
-
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("failed to commit transaction: %w", err)
-	}
-
-	return nil
+	return dp.db.Update(func(tx *bbolt.Tx) error {
+		bucket := tx.Bucket([]byte("torrents"))
+		if bucket == nil {
+			return fmt.Errorf("torrents bucket not found")
+		}
+		
+		for _, torrent := range torrents {
+			if torrent == nil {
+				return fmt.Errorf("torrent cannot be nil")
+			}
+			
+			torrentData := dp.createSerializableTorrent(torrent)
+			jsonData, err := json.Marshal(torrentData)
+			if err != nil {
+				return fmt.Errorf("failed to marshal torrent %s: %w", torrent.InfoHash.String(), err)
+			}
+			
+			if err := bucket.Put([]byte(torrent.InfoHash.String()), jsonData); err != nil {
+				return fmt.Errorf("failed to save torrent %s: %w", torrent.InfoHash.String(), err)
+			}
+		}
+		
+		return nil
+	})
 }
 
 // LoadAllTorrents retrieves all persisted torrent states
 func (dp *DatabasePersistence) LoadAllTorrents(ctx context.Context) ([]*rpc.TorrentState, error) {
-	rows, err := dp.selectAllTorrents.QueryContext(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query torrents: %w", err)
-	}
-	defer rows.Close()
-
 	var torrents []*rpc.TorrentState
-	for rows.Next() {
-		var infoHashStr, jsonData string
-		var addedDate, updatedDate time.Time
-
-		if err := rows.Scan(&infoHashStr, &jsonData, &addedDate, &updatedDate); err != nil {
-			return nil, fmt.Errorf("failed to scan torrent row: %w", err)
+	
+	err := dp.db.View(func(tx *bbolt.Tx) error {
+		bucket := tx.Bucket([]byte("torrents"))
+		if bucket == nil {
+			return fmt.Errorf("torrents bucket not found")
 		}
-
-		var torrent rpc.TorrentState
-		if err := json.Unmarshal([]byte(jsonData), &torrent); err != nil {
-			// Skip corrupted records
-			continue
-		}
-
-		// Set info hash from database
-		torrent.InfoHash = metainfo.NewHashFromString(infoHashStr)
-
-		torrents = append(torrents, &torrent)
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating torrent rows: %w", err)
+		
+		return bucket.ForEach(func(k, v []byte) error {
+			var torrent rpc.TorrentState
+			if err := json.Unmarshal(v, &torrent); err != nil {
+				// Skip corrupted records
+				return nil
+			}
+			
+			// Set info hash from key
+			torrent.InfoHash = metainfo.NewHashFromString(string(k))
+			torrents = append(torrents, &torrent)
+			
+			return nil
+		})
+	})
+	
+	if err != nil {
+		return nil, err
 	}
 
 	return torrents, nil
@@ -336,21 +202,19 @@ func (dp *DatabasePersistence) LoadAllTorrents(ctx context.Context) ([]*rpc.Torr
 
 // DeleteTorrent removes a torrent's persisted state
 func (dp *DatabasePersistence) DeleteTorrent(ctx context.Context, infoHash metainfo.Hash) error {
-	result, err := dp.deleteTorrent.ExecContext(ctx, infoHash.String())
-	if err != nil {
-		return fmt.Errorf("failed to delete torrent: %w", err)
-	}
-
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("failed to get affected rows: %w", err)
-	}
-
-	if rowsAffected == 0 {
-		return fmt.Errorf("torrent not found: %s", infoHash.String())
-	}
-
-	return nil
+	return dp.db.Update(func(tx *bbolt.Tx) error {
+		bucket := tx.Bucket([]byte("torrents"))
+		if bucket == nil {
+			return fmt.Errorf("torrents bucket not found")
+		}
+		
+		// Check if torrent exists first
+		if bucket.Get([]byte(infoHash.String())) == nil {
+			return fmt.Errorf("torrent not found: %s", infoHash.String())
+		}
+		
+		return bucket.Delete([]byte(infoHash.String()))
+	})
 }
 
 // SaveSessionConfig persists session configuration
@@ -364,30 +228,36 @@ func (dp *DatabasePersistence) SaveSessionConfig(ctx context.Context, config *rp
 		return fmt.Errorf("failed to marshal session configuration: %w", err)
 	}
 
-	_, err = dp.insertSession.ExecContext(ctx, jsonData, time.Now())
-	if err != nil {
-		return fmt.Errorf("failed to save session configuration: %w", err)
-	}
-
-	return nil
+	return dp.db.Update(func(tx *bbolt.Tx) error {
+		bucket := tx.Bucket([]byte("session"))
+		if bucket == nil {
+			return fmt.Errorf("session bucket not found")
+		}
+		
+		return bucket.Put([]byte("config"), jsonData)
+	})
 }
 
 // LoadSessionConfig retrieves persisted session configuration
 func (dp *DatabasePersistence) LoadSessionConfig(ctx context.Context) (*rpc.SessionConfiguration, error) {
-	var jsonData string
-	var updatedDate time.Time
-
-	err := dp.selectSession.QueryRowContext(ctx).Scan(&jsonData, &updatedDate)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("session configuration not found")
-		}
-		return nil, fmt.Errorf("failed to query session configuration: %w", err)
-	}
-
 	var config rpc.SessionConfiguration
-	if err := json.Unmarshal([]byte(jsonData), &config); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal session configuration: %w", err)
+	
+	err := dp.db.View(func(tx *bbolt.Tx) error {
+		bucket := tx.Bucket([]byte("session"))
+		if bucket == nil {
+			return fmt.Errorf("session bucket not found")
+		}
+		
+		jsonData := bucket.Get([]byte("config"))
+		if jsonData == nil {
+			return fmt.Errorf("session configuration not found")
+		}
+		
+		return json.Unmarshal(jsonData, &config)
+	})
+	
+	if err != nil {
+		return nil, err
 	}
 
 	return &config, nil
@@ -395,155 +265,31 @@ func (dp *DatabasePersistence) LoadSessionConfig(ctx context.Context) (*rpc.Sess
 
 // Close cleans up database resources
 func (dp *DatabasePersistence) Close() error {
-	// Close prepared statements
-	statements := []*sql.Stmt{
-		dp.insertTorrent,
-		dp.updateTorrent,
-		dp.selectTorrent,
-		dp.deleteTorrent,
-		dp.selectAllTorrents,
-		dp.insertSession,
-		dp.selectSession,
-		dp.insertMetrics,
-	}
-
-	for _, stmt := range statements {
-		if stmt != nil {
-			stmt.Close()
-		}
-	}
-
 	return dp.db.Close()
 }
 
-// Helper methods
-
-func (dp *DatabasePersistence) initSchema() error {
-	// Create torrents table
-	createTorrents := `
-	CREATE TABLE IF NOT EXISTS torrents (
-		info_hash TEXT PRIMARY KEY,
-		data TEXT NOT NULL,
-		status INTEGER NOT NULL,
-		percent_done REAL NOT NULL,
-		downloaded INTEGER NOT NULL,
-		uploaded INTEGER NOT NULL,
-		added_date DATETIME NOT NULL,
-		updated_date DATETIME NOT NULL
-	);
-	
-	CREATE INDEX IF NOT EXISTS idx_torrents_status ON torrents(status);
-	CREATE INDEX IF NOT EXISTS idx_torrents_updated ON torrents(updated_date);
-	`
-
-	// Create session configuration table
-	createSession := `
-	CREATE TABLE IF NOT EXISTS session_config (
-		id INTEGER PRIMARY KEY CHECK (id = 1),
-		data TEXT NOT NULL,
-		updated_date DATETIME NOT NULL
-	);
-	`
-
-	// Create metrics table if enabled
-	createMetrics := ""
-	if dp.metricsEnabled {
-		createMetrics = `
-		CREATE TABLE IF NOT EXISTS torrent_metrics (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			info_hash TEXT NOT NULL,
-			timestamp DATETIME NOT NULL,
-			downloaded INTEGER NOT NULL,
-			uploaded INTEGER NOT NULL,
-			download_rate INTEGER NOT NULL,
-			upload_rate INTEGER NOT NULL,
-			peer_count INTEGER NOT NULL,
-			FOREIGN KEY (info_hash) REFERENCES torrents(info_hash) ON DELETE CASCADE
-		);
-		
-		CREATE INDEX IF NOT EXISTS idx_metrics_hash_time ON torrent_metrics(info_hash, timestamp);
-		CREATE INDEX IF NOT EXISTS idx_metrics_timestamp ON torrent_metrics(timestamp);
-		`
-	}
-
-	// Execute schema creation
-	schema := createTorrents + createSession + createMetrics
-	if _, err := dp.db.Exec(schema); err != nil {
-		return fmt.Errorf("failed to create schema: %w", err)
-	}
-
-	return nil
-}
-
-func (dp *DatabasePersistence) prepareStatements() error {
-	var err error
-
-	// Torrent statements
-	dp.insertTorrent, err = dp.db.Prepare(`
-		INSERT INTO torrents (info_hash, data, status, percent_done, downloaded, uploaded, added_date, updated_date)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-	`)
-	if err != nil {
-		return fmt.Errorf("failed to prepare insert torrent statement: %w", err)
-	}
-
-	dp.updateTorrent, err = dp.db.Prepare(`
-		UPDATE torrents 
-		SET data = ?, status = ?, percent_done = ?, downloaded = ?, uploaded = ?, updated_date = ?
-		WHERE info_hash = ?
-	`)
-	if err != nil {
-		return fmt.Errorf("failed to prepare update torrent statement: %w", err)
-	}
-
-	dp.selectTorrent, err = dp.db.Prepare(`
-		SELECT data, added_date, updated_date FROM torrents WHERE info_hash = ?
-	`)
-	if err != nil {
-		return fmt.Errorf("failed to prepare select torrent statement: %w", err)
-	}
-
-	dp.deleteTorrent, err = dp.db.Prepare(`
-		DELETE FROM torrents WHERE info_hash = ?
-	`)
-	if err != nil {
-		return fmt.Errorf("failed to prepare delete torrent statement: %w", err)
-	}
-
-	dp.selectAllTorrents, err = dp.db.Prepare(`
-		SELECT info_hash, data, added_date, updated_date FROM torrents ORDER BY added_date
-	`)
-	if err != nil {
-		return fmt.Errorf("failed to prepare select all torrents statement: %w", err)
-	}
-
-	// Session statements
-	dp.insertSession, err = dp.db.Prepare(`
-		INSERT OR REPLACE INTO session_config (id, data, updated_date) VALUES (1, ?, ?)
-	`)
-	if err != nil {
-		return fmt.Errorf("failed to prepare insert session statement: %w", err)
-	}
-
-	dp.selectSession, err = dp.db.Prepare(`
-		SELECT data, updated_date FROM session_config WHERE id = 1
-	`)
-	if err != nil {
-		return fmt.Errorf("failed to prepare select session statement: %w", err)
-	}
-
-	// Metrics statement if enabled
-	if dp.metricsEnabled {
-		dp.insertMetrics, err = dp.db.Prepare(`
-			INSERT INTO torrent_metrics (info_hash, timestamp, downloaded, uploaded, download_rate, upload_rate, peer_count)
-			VALUES (?, ?, ?, ?, ?, ?, ?)
-		`)
-		if err != nil {
-			return fmt.Errorf("failed to prepare insert metrics statement: %w", err)
+// initBuckets initializes all required bbolt buckets
+func (dp *DatabasePersistence) initBuckets() error {
+	return dp.db.Update(func(tx *bbolt.Tx) error {
+		// Create torrents bucket
+		if _, err := tx.CreateBucketIfNotExists([]byte("torrents")); err != nil {
+			return fmt.Errorf("failed to create torrents bucket: %w", err)
 		}
-	}
-
-	return nil
+		
+		// Create session bucket
+		if _, err := tx.CreateBucketIfNotExists([]byte("session")); err != nil {
+			return fmt.Errorf("failed to create session bucket: %w", err)
+		}
+		
+		// Create metrics bucket if enabled
+		if dp.metricsEnabled {
+			if _, err := tx.CreateBucketIfNotExists([]byte("metrics")); err != nil {
+				return fmt.Errorf("failed to create metrics bucket: %w", err)
+			}
+		}
+		
+		return nil
+	})
 }
 
 func (dp *DatabasePersistence) createSerializableTorrent(torrent *rpc.TorrentState) map[string]interface{} {

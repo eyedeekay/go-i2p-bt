@@ -173,9 +173,8 @@ func createPersistence(config Configuration) (persistence.TorrentPersistence, er
 		return persistence.NewMemoryPersistence(backup, config.SnapshotInterval), nil
 
 	case "database":
-		// Note: This requires adding github.com/mattn/go-sqlite3 to go.mod
-		// return persistence.NewDatabasePersistence(config.DataDir+"/torrents.db", true)
-		return nil, fmt.Errorf("database persistence requires adding sqlite3 dependency to go.mod")
+		// Note: This requires adding go.etcd.io/bbolt to go.mod
+		return persistence.NewDatabasePersistence(config.DataDir+"/torrents.db", true)
 
 	default:
 		return nil, fmt.Errorf("unknown persistence type: %s", config.PersistenceType)

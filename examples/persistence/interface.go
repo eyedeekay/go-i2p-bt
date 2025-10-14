@@ -23,7 +23,7 @@
 //
 // This package demonstrates three common approaches:
 //   - File-based persistence using JSON
-//   - Database persistence using SQLite
+//   - Database persistence using bbolt (BoltDB)
 //   - In-memory persistence with optional snapshotting
 //
 // Each implementation can be used as a starting point for more sophisticated
