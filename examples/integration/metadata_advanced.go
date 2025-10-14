@@ -610,26 +610,56 @@ func (me *MetadataExtensions) collectQualityStatistics(torrentIDs []int64) map[s
 	}
 
 	for _, torrentID := range torrentIDs {
-		if qualityData, exists := me.getMetadata(torrentID, "quality"); exists {
-			if qualityMap, ok := qualityData.(map[string]interface{}); ok {
-				if rating, ok := qualityMap["community_rating"].(float64); ok {
-					if rating >= 4.0 {
-						qualityStats["high_quality"]++
-					} else if rating >= 2.5 {
-						qualityStats["medium_quality"]++
-					} else {
-						qualityStats["low_quality"]++
-					}
-				} else {
-					qualityStats["unrated"]++
-				}
-			}
-		} else {
-			qualityStats["unrated"]++
-		}
+		processTorrentQuality(me, torrentID, qualityStats)
 	}
 
 	return qualityStats
+}
+
+// processTorrentQuality extracts and categorizes quality rating for a single torrent.
+// Updates the quality statistics map in place based on the torrent's community rating.
+func processTorrentQuality(me *MetadataExtensions, torrentID int64, qualityStats map[string]int) {
+	rating, found := extractQualityRating(me, torrentID)
+	if !found {
+		qualityStats["unrated"]++
+		return
+	}
+
+	tier := categorizeByRating(rating)
+	qualityStats[tier]++
+}
+
+// extractQualityRating retrieves the community rating for a torrent.
+// Returns the rating value and true if found, or 0.0 and false if not available.
+func extractQualityRating(me *MetadataExtensions, torrentID int64) (float64, bool) {
+	qualityData, exists := me.getMetadata(torrentID, "quality")
+	if !exists {
+		return 0.0, false
+	}
+
+	qualityMap, ok := qualityData.(map[string]interface{})
+	if !ok {
+		return 0.0, false
+	}
+
+	rating, ok := qualityMap["community_rating"].(float64)
+	if !ok {
+		return 0.0, false
+	}
+
+	return rating, true
+}
+
+// categorizeByRating determines the quality tier based on rating value.
+// Returns one of: "high_quality" (>=4.0), "medium_quality" (>=2.5), or "low_quality" (<2.5).
+func categorizeByRating(rating float64) string {
+	if rating >= 4.0 {
+		return "high_quality"
+	}
+	if rating >= 2.5 {
+		return "medium_quality"
+	}
+	return "low_quality"
 }
 
 // formatQualityReport formats quality statistics into a readable report section.
