@@ -176,6 +176,66 @@ func (fp *FilePersistence) LoadTorrent(ctx context.Context, infoHash metainfo.Ha
 	return &torrent, nil
 }
 
+// writeTorrentToTempFile serializes a torrent and writes it to a temporary file.
+func (fp *FilePersistence) writeTorrentToTempFile(torrent *rpc.TorrentState) (targetFile, tempFile string, err error) {
+	serializable := fp.createSerializableTorrent(torrent)
+	data, err := json.MarshalIndent(serializable, "", "  ")
+	if err != nil {
+		return "", "", fmt.Errorf("failed to marshal torrent %s: %w", torrent.InfoHash.String(), err)
+	}
+
+	targetFile = fp.getTorrentFilePath(torrent.InfoHash)
+	tempFile = targetFile + ".tmp"
+
+	if err := os.WriteFile(tempFile, data, 0o644); err != nil {
+		return "", "", fmt.Errorf("failed to write temporary file for %s: %w", torrent.InfoHash.String(), err)
+	}
+
+	return targetFile, tempFile, nil
+}
+
+// cleanupTempFiles removes all temporary files created during batch operations.
+func cleanupTempFiles(tempFiles map[string]string) {
+	for _, tempFile := range tempFiles {
+		os.Remove(tempFile)
+	}
+}
+
+// renameTempFilesAtomically performs atomic rename operations for all prepared temporary files.
+func renameTempFilesAtomically(tempFiles map[string]string) error {
+	for target, temp := range tempFiles {
+		if err := os.Rename(temp, target); err != nil {
+			return fmt.Errorf("failed to rename temporary file %s: %w", temp, err)
+		}
+	}
+	return nil
+}
+
+// prepareTorrentsForBatchSave writes all torrents to temporary files and tracks them for atomic commit.
+func (fp *FilePersistence) prepareTorrentsForBatchSave(torrents []*rpc.TorrentState) (map[string]string, error) {
+	tempFiles := make(map[string]string) // target -> temp
+
+	for _, torrent := range torrents {
+		if torrent == nil {
+			return nil, fmt.Errorf("torrent cannot be nil")
+		}
+
+		targetFile, tempFile, err := fp.writeTorrentToTempFile(torrent)
+		if err != nil {
+			return nil, err
+		}
+
+		tempFiles[targetFile] = tempFile
+
+		// Save MetaInfo if available (non-critical operation)
+		if torrent.MetaInfo != nil {
+			fp.saveMetaInfo(torrent.InfoHash, torrent.MetaInfo)
+		}
+	}
+
+	return tempFiles, nil
+}
+
 // SaveAllTorrents persists the state of multiple torrents atomically
 // by writing to temporary files first, then renaming all at once
 func (fp *FilePersistence) SaveAllTorrents(ctx context.Context, torrents []*rpc.TorrentState) error {
@@ -186,54 +246,19 @@ func (fp *FilePersistence) SaveAllTorrents(ctx context.Context, torrents []*rpc.
 	fp.mu.Lock()
 	defer fp.mu.Unlock()
 
-	// Check context cancellation
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 
-	// Prepare all temporary files first
-	tempFiles := make(map[string]string) // target -> temp
-	cleanup := func() {
-		for _, tempFile := range tempFiles {
-			os.Remove(tempFile)
-		}
+	tempFiles, err := fp.prepareTorrentsForBatchSave(torrents)
+	if err != nil {
+		cleanupTempFiles(tempFiles)
+		return err
 	}
 
-	// Write all torrents to temporary files
-	for _, torrent := range torrents {
-		if torrent == nil {
-			cleanup()
-			return fmt.Errorf("torrent cannot be nil")
-		}
-
-		serializable := fp.createSerializableTorrent(torrent)
-		data, err := json.MarshalIndent(serializable, "", "  ")
-		if err != nil {
-			cleanup()
-			return fmt.Errorf("failed to marshal torrent %s: %w", torrent.InfoHash.String(), err)
-		}
-
-		torrentFile := fp.getTorrentFilePath(torrent.InfoHash)
-		tempFile := torrentFile + ".tmp"
-		tempFiles[torrentFile] = tempFile
-
-		if err := os.WriteFile(tempFile, data, 0o644); err != nil {
-			cleanup()
-			return fmt.Errorf("failed to write temporary file for %s: %w", torrent.InfoHash.String(), err)
-		}
-
-		// Save MetaInfo if available
-		if torrent.MetaInfo != nil {
-			fp.saveMetaInfo(torrent.InfoHash, torrent.MetaInfo)
-		}
-	}
-
-	// Atomically rename all files
-	for target, temp := range tempFiles {
-		if err := os.Rename(temp, target); err != nil {
-			cleanup()
-			return fmt.Errorf("failed to rename temporary file %s: %w", temp, err)
-		}
+	if err := renameTempFilesAtomically(tempFiles); err != nil {
+		cleanupTempFiles(tempFiles)
+		return err
 	}
 
 	return nil

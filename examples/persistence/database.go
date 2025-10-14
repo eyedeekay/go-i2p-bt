@@ -181,72 +181,116 @@ func (dp *DatabasePersistence) LoadTorrent(ctx context.Context, infoHash metainf
 	return &torrent, nil
 }
 
+// beginSaveTransaction initializes a database transaction with prepared statements
+// for atomic torrent persistence operations.
+func (dp *DatabasePersistence) beginSaveTransaction(ctx context.Context) (*sql.Tx, *sql.Stmt, *sql.Stmt, error) {
+	tx, err := dp.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to begin transaction: %w", err)
+	}
+
+	insertStmt := tx.StmtContext(ctx, dp.insertTorrent)
+	updateStmt := tx.StmtContext(ctx, dp.updateTorrent)
+
+	return tx, insertStmt, updateStmt, nil
+}
+
+// serializeTorrentData converts a torrent state to JSON format suitable for database storage.
+func (dp *DatabasePersistence) serializeTorrentData(torrent *rpc.TorrentState) ([]byte, error) {
+	torrentData := dp.createSerializableTorrent(torrent)
+	jsonData, err := json.Marshal(torrentData)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal torrent %s: %w", torrent.InfoHash.String(), err)
+	}
+	return jsonData, nil
+}
+
+// upsertTorrentInTransaction performs an update-or-insert operation for a single torrent
+// within the provided transaction context.
+func (dp *DatabasePersistence) upsertTorrentInTransaction(
+	ctx context.Context,
+	updateStmt, insertStmt *sql.Stmt,
+	torrent *rpc.TorrentState,
+	jsonData []byte,
+) error {
+	// Try update first
+	result, err := updateStmt.ExecContext(ctx,
+		jsonData,
+		torrent.Status,
+		torrent.PercentDone,
+		torrent.Downloaded,
+		torrent.Uploaded,
+		time.Now(),
+		torrent.InfoHash.String(),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to update torrent %s: %w", torrent.InfoHash.String(), err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get affected rows for %s: %w", torrent.InfoHash.String(), err)
+	}
+
+	// Insert if update didn't affect any rows
+	if rowsAffected == 0 {
+		_, err = insertStmt.ExecContext(ctx,
+			torrent.InfoHash.String(),
+			jsonData,
+			torrent.Status,
+			torrent.PercentDone,
+			torrent.Downloaded,
+			torrent.Uploaded,
+			torrent.AddedDate,
+			time.Now(),
+		)
+		if err != nil {
+			return fmt.Errorf("failed to insert torrent %s: %w", torrent.InfoHash.String(), err)
+		}
+	}
+
+	return nil
+}
+
+// processTorrentsInTransaction iterates through torrents and persists each one within a transaction.
+func (dp *DatabasePersistence) processTorrentsInTransaction(
+	ctx context.Context,
+	updateStmt, insertStmt *sql.Stmt,
+	torrents []*rpc.TorrentState,
+) error {
+	for _, torrent := range torrents {
+		if torrent == nil {
+			return fmt.Errorf("torrent cannot be nil")
+		}
+
+		jsonData, err := dp.serializeTorrentData(torrent)
+		if err != nil {
+			return err
+		}
+
+		if err := dp.upsertTorrentInTransaction(ctx, updateStmt, insertStmt, torrent, jsonData); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // SaveAllTorrents persists the state of multiple torrents atomically using a transaction
 func (dp *DatabasePersistence) SaveAllTorrents(ctx context.Context, torrents []*rpc.TorrentState) error {
 	if len(torrents) == 0 {
 		return nil
 	}
 
-	// Start transaction for atomic operation
-	tx, err := dp.db.BeginTx(ctx, nil)
+	tx, insertStmt, updateStmt, err := dp.beginSaveTransaction(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %w", err)
+		return err
 	}
 	defer tx.Rollback()
 
-	// Prepare statements within transaction
-	insertStmt := tx.StmtContext(ctx, dp.insertTorrent)
-	updateStmt := tx.StmtContext(ctx, dp.updateTorrent)
-
-	for _, torrent := range torrents {
-		if torrent == nil {
-			return fmt.Errorf("torrent cannot be nil")
-		}
-
-		torrentData := dp.createSerializableTorrent(torrent)
-		jsonData, err := json.Marshal(torrentData)
-		if err != nil {
-			return fmt.Errorf("failed to marshal torrent %s: %w", torrent.InfoHash.String(), err)
-		}
-
-		// Try update first
-		result, err := updateStmt.ExecContext(ctx,
-			jsonData,
-			torrent.Status,
-			torrent.PercentDone,
-			torrent.Downloaded,
-			torrent.Uploaded,
-			time.Now(),
-			torrent.InfoHash.String(),
-		)
-		if err != nil {
-			return fmt.Errorf("failed to update torrent %s: %w", torrent.InfoHash.String(), err)
-		}
-
-		rowsAffected, err := result.RowsAffected()
-		if err != nil {
-			return fmt.Errorf("failed to get affected rows for %s: %w", torrent.InfoHash.String(), err)
-		}
-
-		// Insert if update didn't affect any rows
-		if rowsAffected == 0 {
-			_, err = insertStmt.ExecContext(ctx,
-				torrent.InfoHash.String(),
-				jsonData,
-				torrent.Status,
-				torrent.PercentDone,
-				torrent.Downloaded,
-				torrent.Uploaded,
-				torrent.AddedDate,
-				time.Now(),
-			)
-			if err != nil {
-				return fmt.Errorf("failed to insert torrent %s: %w", torrent.InfoHash.String(), err)
-			}
-		}
+	if err := dp.processTorrentsInTransaction(ctx, updateStmt, insertStmt, torrents); err != nil {
+		return err
 	}
 
-	// Commit transaction
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}

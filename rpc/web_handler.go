@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"path"
 	"path/filepath"
@@ -381,57 +382,94 @@ func CreateMuxWithWebSocketSupport(rpcServer *Server, webConfig WebHandlerConfig
 //  5. Returning the result in JSON format
 func (w *WebHandler) handleFileUpload(rw http.ResponseWriter, r *http.Request) {
 	// Check authentication if required
-	if w.config.RequireAuth && w.server != nil {
-		if !w.server.checkAuth(r) {
-			rw.Header().Set("WWW-Authenticate", `Basic realm="Transmission RPC"`)
-			http.Error(rw, "Authentication required", http.StatusUnauthorized)
-			return
-		}
+	if !w.validateAuthentication(rw, r) {
+		return
 	}
 
 	// Set security headers
 	w.setSecurityHeaders(rw)
 
+	// Parse and extract uploaded file
+	fileBytes, header, err := w.extractUploadedFile(rw, r)
+	if err != nil {
+		return // Error already sent in extractUploadedFile
+	}
+
+	// Validate the file
+	if !w.validateTorrentFile(rw, header, fileBytes) {
+		return // Error already sent in validateTorrentFile
+	}
+
+	// Process file and add torrent
+	w.processTorrentUpload(rw, r, fileBytes)
+}
+
+// validateAuthentication checks if authentication is required and valid
+func (w *WebHandler) validateAuthentication(rw http.ResponseWriter, r *http.Request) bool {
+	if w.config.RequireAuth && w.server != nil {
+		if !w.server.checkAuth(r) {
+			rw.Header().Set("WWW-Authenticate", `Basic realm="Transmission RPC"`)
+			http.Error(rw, "Authentication required", http.StatusUnauthorized)
+			return false
+		}
+	}
+	return true
+}
+
+// extractUploadedFile parses the multipart form and extracts the torrent file
+func (w *WebHandler) extractUploadedFile(rw http.ResponseWriter, r *http.Request) ([]byte, *multipart.FileHeader, error) {
 	// Parse multipart form with size limit (10MB max)
 	const maxUploadSize = 10 << 20 // 10MB
 	if err := r.ParseMultipartForm(maxUploadSize); err != nil {
 		w.sendJSONError(rw, "Failed to parse upload", http.StatusBadRequest)
-		return
+		return nil, nil, err
 	}
 
 	// Get the uploaded file
 	file, header, err := r.FormFile("torrent")
 	if err != nil {
 		w.sendJSONError(rw, "No torrent file provided", http.StatusBadRequest)
-		return
+		return nil, nil, err
 	}
 	defer file.Close()
-
-	// Validate file extension
-	if !strings.HasSuffix(strings.ToLower(header.Filename), ".torrent") {
-		w.sendJSONError(rw, "File must have .torrent extension", http.StatusBadRequest)
-		return
-	}
-
-	// Read and validate file size
-	if header.Size > maxUploadSize {
-		w.sendJSONError(rw, "File too large (max 10MB)", http.StatusBadRequest)
-		return
-	}
 
 	// Read file content
 	fileBytes, err := io.ReadAll(file)
 	if err != nil {
 		w.sendJSONError(rw, "Failed to read file", http.StatusInternalServerError)
-		return
+		return nil, nil, err
+	}
+
+	return fileBytes, header, nil
+}
+
+// validateTorrentFile validates the uploaded file meets torrent requirements
+func (w *WebHandler) validateTorrentFile(rw http.ResponseWriter, header *multipart.FileHeader, fileBytes []byte) bool {
+	const maxUploadSize = 10 << 20 // 10MB
+
+	// Validate file extension
+	if !strings.HasSuffix(strings.ToLower(header.Filename), ".torrent") {
+		w.sendJSONError(rw, "File must have .torrent extension", http.StatusBadRequest)
+		return false
+	}
+
+	// Read and validate file size
+	if header.Size > maxUploadSize {
+		w.sendJSONError(rw, "File too large (max 10MB)", http.StatusBadRequest)
+		return false
 	}
 
 	// Basic validation - check for torrent file signature
 	if !w.isValidTorrentFile(fileBytes) {
 		w.sendJSONError(rw, "Invalid torrent file format", http.StatusBadRequest)
-		return
+		return false
 	}
 
+	return true
+}
+
+// processTorrentUpload converts the file to RPC request and adds the torrent
+func (w *WebHandler) processTorrentUpload(rw http.ResponseWriter, r *http.Request, fileBytes []byte) {
 	// Convert to base64 for RPC
 	base64Data := base64.StdEncoding.EncodeToString(fileBytes)
 
