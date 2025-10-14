@@ -313,20 +313,40 @@ func (me *MetadataExtensions) CompleteTorrentDownload(torrentID int64) error {
 	return me.setMetadata(torrentID, "tracking", updateData, "completion_tracker", []string{"tracking", "completed"})
 }
 
+// RecordTorrentError records an error occurrence for a torrent and updates tracking metadata.
+// It increments the retry count, adds the error to history, and maintains a rolling history of the last 10 errors.
 func (me *MetadataExtensions) RecordTorrentError(torrentID int64, errorMsg string) error {
-	// Get existing tracking data
-	var trackingData map[string]interface{}
-	if existingData, exists := me.getMetadata(torrentID, "tracking"); exists {
-		if existingMap, ok := existingData.(map[string]interface{}); ok {
-			trackingData = existingMap
-		}
+	trackingData, err := me.loadTrackingData(torrentID)
+	if err != nil {
+		return err
 	}
 
-	if trackingData == nil {
-		return fmt.Errorf("tracking data not found for torrent %d", torrentID)
+	incrementRetryCount(trackingData)
+	updateErrorHistory(trackingData, errorMsg)
+	updateLastActivity(trackingData)
+
+	return me.setMetadata(torrentID, "tracking", trackingData, "error_tracker", []string{"tracking", "error"})
+}
+
+// loadTrackingData retrieves and validates the tracking metadata for a torrent.
+// Returns an error if the tracking data is not found or invalid.
+func (me *MetadataExtensions) loadTrackingData(torrentID int64) (map[string]interface{}, error) {
+	existingData, exists := me.getMetadata(torrentID, "tracking")
+	if !exists {
+		return nil, fmt.Errorf("tracking data not found for torrent %d", torrentID)
 	}
 
-	// Increment retry count
+	trackingMap, ok := existingData.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("tracking data not found for torrent %d", torrentID)
+	}
+
+	return trackingMap, nil
+}
+
+// incrementRetryCount increases the retry count in the tracking data by one.
+// Handles both float64 and int representations from metadata storage.
+func incrementRetryCount(trackingData map[string]interface{}) {
 	retryCount := 0
 	if count, ok := trackingData["retry_count"].(float64); ok {
 		retryCount = int(count) + 1
@@ -334,8 +354,21 @@ func (me *MetadataExtensions) RecordTorrentError(torrentID int64, errorMsg strin
 		retryCount = count + 1
 	}
 	trackingData["retry_count"] = retryCount
+}
 
-	// Add to error history
+// updateErrorHistory adds a new error to the error history with a timestamp.
+// Maintains a rolling history of the last 10 errors.
+func updateErrorHistory(trackingData map[string]interface{}, errorMsg string) {
+	errorHistory := extractErrorHistory(trackingData)
+	errorEntry := formatErrorEntry(errorMsg)
+	errorHistory = append(errorHistory, errorEntry)
+	errorHistory = limitErrorHistory(errorHistory, 10)
+	trackingData["error_history"] = errorHistory
+}
+
+// extractErrorHistory retrieves the existing error history from tracking data.
+// Returns an empty slice if no history exists or if the data format is invalid.
+func extractErrorHistory(trackingData map[string]interface{}) []string {
 	errorHistory := []string{}
 	if history, ok := trackingData["error_history"].([]interface{}); ok {
 		for _, err := range history {
@@ -344,20 +377,26 @@ func (me *MetadataExtensions) RecordTorrentError(torrentID int64, errorMsg strin
 			}
 		}
 	}
+	return errorHistory
+}
 
-	// Add new error with timestamp
-	errorEntry := fmt.Sprintf("%d: %s", time.Now().Unix(), errorMsg)
-	errorHistory = append(errorHistory, errorEntry)
+// formatErrorEntry creates a timestamped error entry string.
+func formatErrorEntry(errorMsg string) string {
+	return fmt.Sprintf("%d: %s", time.Now().Unix(), errorMsg)
+}
 
-	// Keep only last 10 errors
-	if len(errorHistory) > 10 {
-		errorHistory = errorHistory[len(errorHistory)-10:]
+// limitErrorHistory ensures the error history does not exceed the specified maximum size.
+// Keeps only the most recent entries.
+func limitErrorHistory(history []string, maxSize int) []string {
+	if len(history) > maxSize {
+		return history[len(history)-maxSize:]
 	}
+	return history
+}
 
-	trackingData["error_history"] = errorHistory
+// updateLastActivity sets the last activity timestamp to the current time.
+func updateLastActivity(trackingData map[string]interface{}) {
 	trackingData["last_activity"] = time.Now().Unix()
-
-	return me.setMetadata(torrentID, "tracking", trackingData, "error_tracker", []string{"tracking", "error"})
 }
 
 func (me *MetadataExtensions) GetDownloadDuration(torrentID int64) (time.Duration, error) {

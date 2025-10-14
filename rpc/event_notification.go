@@ -315,44 +315,80 @@ func (ens *EventNotificationSystem) Unsubscribe(subscriberID string) error {
 
 // PublishEvent broadcasts an event to all relevant subscribers
 func (ens *EventNotificationSystem) PublishEvent(event *Event) error {
+	if err := validateEvent(event); err != nil {
+		return err
+	}
+
+	if err := ens.checkSystemShutdown(); err != nil {
+		return err
+	}
+
+	normalizeEvent(event)
+
+	return ens.sendEventToChannel(event)
+}
+
+// validateEvent checks if the event is valid and non-nil.
+func validateEvent(event *Event) error {
 	if event == nil {
 		return fmt.Errorf("event cannot be nil")
 	}
+	return nil
+}
 
-	// Check if system is shut down
+// checkSystemShutdown verifies that the event notification system is still running.
+// Returns an error if the system has been shut down.
+func (ens *EventNotificationSystem) checkSystemShutdown() error {
 	select {
 	case <-ens.shutdownCtx.Done():
 		return fmt.Errorf("event notification system is shut down")
 	default:
+		return nil
 	}
+}
 
-	// Generate ID if not provided
+// normalizeEvent ensures the event has required fields populated.
+// Generates an ID if not provided and sets the timestamp if missing.
+func normalizeEvent(event *Event) {
 	if event.ID == "" {
 		event.ID = fmt.Sprintf("%d-%s", time.Now().UnixNano(), event.Type)
 	}
 
-	// Set timestamp if not provided
 	if event.Timestamp.IsZero() {
 		event.Timestamp = time.Now()
 	}
+}
 
+// sendEventToChannel attempts to send the event to the notification channel.
+// Returns nil on success, or an error if the system is shut down or the buffer is full.
+func (ens *EventNotificationSystem) sendEventToChannel(event *Event) error {
 	select {
 	case ens.eventChan <- event:
-		ens.mu.Lock()
-		ens.metrics.TotalEvents++
-		ens.metrics.LastEvent = time.Now()
-		ens.mu.Unlock()
-		return nil
+		return ens.recordSuccessfulEvent()
 	case <-ens.shutdownCtx.Done():
 		return fmt.Errorf("event notification system is shut down")
 	default:
-		// Channel is full, drop event
-		ens.mu.Lock()
-		ens.metrics.EventsDropped++
-		ens.mu.Unlock()
-		ens.logger("Event dropped due to full buffer: %s", event.Type)
-		return fmt.Errorf("event buffer full, event dropped")
+		return ens.handleDroppedEvent(event)
 	}
+}
+
+// recordSuccessfulEvent updates metrics after successfully publishing an event.
+func (ens *EventNotificationSystem) recordSuccessfulEvent() error {
+	ens.mu.Lock()
+	ens.metrics.TotalEvents++
+	ens.metrics.LastEvent = time.Now()
+	ens.mu.Unlock()
+	return nil
+}
+
+// handleDroppedEvent processes a dropped event when the channel buffer is full.
+// Updates metrics and logs the dropped event.
+func (ens *EventNotificationSystem) handleDroppedEvent(event *Event) error {
+	ens.mu.Lock()
+	ens.metrics.EventsDropped++
+	ens.mu.Unlock()
+	ens.logger("Event dropped due to full buffer: %s", event.Type)
+	return fmt.Errorf("event buffer full, event dropped")
 }
 
 // PublishTorrentEvent is a convenience method for publishing torrent-related events
