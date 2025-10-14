@@ -277,19 +277,11 @@ func registerMonitoringHooks(hookManager *rpc.HookManager) error {
 func restoreSessionState(manager *rpc.TorrentManager, pers persistence.TorrentPersistence) error {
 	ctx := context.Background()
 
-	// Load session configuration
-	if sessionConfig, err := pers.LoadSessionConfig(ctx); err == nil {
-		if err := manager.UpdateSessionConfig(*sessionConfig); err != nil {
-			log.Printf("Warning: Failed to restore session config: %v", err)
-		} else {
-			log.Println("Session configuration restored")
-		}
-	}
+	restoreSessionConfiguration(ctx, manager, pers)
 
-	// Load all torrents
-	torrents, err := pers.LoadAllTorrents(ctx)
+	torrents, err := loadPersistedTorrents(ctx, pers)
 	if err != nil {
-		return fmt.Errorf("failed to load torrents: %w", err)
+		return err
 	}
 
 	if len(torrents) == 0 {
@@ -297,33 +289,71 @@ func restoreSessionState(manager *rpc.TorrentManager, pers persistence.TorrentPe
 		return nil
 	}
 
-	// Restore torrents to manager
-	restored := 0
-	for _, torrent := range torrents {
-		// Add torrent back to manager (this will trigger hooks)
-		if torrent.MetaInfo != nil {
-			// Use MetaInfo if available
-			addReq := rpc.TorrentAddRequest{
-				DownloadDir: torrent.DownloadDir,
-				Paused:      torrent.Status == rpc.TorrentStatusStopped,
-			}
-			// Convert MetaInfo to base64 string for the request
-			if metaBytes, err := bencode.EncodeBytes(torrent.MetaInfo); err == nil {
-				addReq.Metainfo = base64.StdEncoding.EncodeToString(metaBytes)
-				if _, err := manager.AddTorrent(addReq); err != nil {
-					log.Printf("Warning: Failed to restore torrent %s: %v", torrent.InfoHash.String(), err)
-					continue
-				}
-			} else {
-				log.Printf("Warning: Failed to marshal MetaInfo for torrent %s: %v", torrent.InfoHash.String(), err)
-				continue
-			}
-		}
-		restored++
-	}
-
+	restored := restoreTorrentsToManager(manager, torrents)
 	log.Printf("Restored %d torrents from persistence", restored)
 	return nil
+}
+
+// restoreSessionConfiguration loads and applies the saved session configuration.
+func restoreSessionConfiguration(ctx context.Context, manager *rpc.TorrentManager, pers persistence.TorrentPersistence) {
+	sessionConfig, err := pers.LoadSessionConfig(ctx)
+	if err != nil {
+		return
+	}
+
+	if err := manager.UpdateSessionConfig(*sessionConfig); err != nil {
+		log.Printf("Warning: Failed to restore session config: %v", err)
+	} else {
+		log.Println("Session configuration restored")
+	}
+}
+
+// loadPersistedTorrents retrieves all saved torrents from persistence storage.
+func loadPersistedTorrents(ctx context.Context, pers persistence.TorrentPersistence) ([]*rpc.TorrentState, error) {
+	torrents, err := pers.LoadAllTorrents(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load torrents: %w", err)
+	}
+	return torrents, nil
+}
+
+// restoreTorrentsToManager adds each persisted torrent back to the manager.
+// It returns the count of successfully restored torrents.
+func restoreTorrentsToManager(manager *rpc.TorrentManager, torrents []*rpc.TorrentState) int {
+	restored := 0
+	for _, torrent := range torrents {
+		if torrent.MetaInfo == nil {
+			continue
+		}
+
+		if addTorrentToManager(manager, torrent) {
+			restored++
+		}
+	}
+	return restored
+}
+
+// addTorrentToManager converts and adds a single torrent to the manager.
+// It returns true if the torrent was successfully added.
+func addTorrentToManager(manager *rpc.TorrentManager, torrent *rpc.TorrentState) bool {
+	addReq := rpc.TorrentAddRequest{
+		DownloadDir: torrent.DownloadDir,
+		Paused:      torrent.Status == rpc.TorrentStatusStopped,
+	}
+
+	metaBytes, err := bencode.EncodeBytes(torrent.MetaInfo)
+	if err != nil {
+		log.Printf("Warning: Failed to marshal MetaInfo for torrent %s: %v", torrent.InfoHash.String(), err)
+		return false
+	}
+
+	addReq.Metainfo = base64.StdEncoding.EncodeToString(metaBytes)
+	if _, err := manager.AddTorrent(addReq); err != nil {
+		log.Printf("Warning: Failed to restore torrent %s: %v", torrent.InfoHash.String(), err)
+		return false
+	}
+
+	return true
 }
 
 func saveSessionState(ctx context.Context, manager *rpc.TorrentManager, pers persistence.TorrentPersistence) error {
