@@ -218,24 +218,51 @@ func (ens *EventNotificationSystem) SetTimeout(timeout time.Duration) {
 
 // Subscribe registers a new event subscriber
 func (ens *EventNotificationSystem) Subscribe(subscriber EventSubscriber) error {
-	if subscriber == nil {
-		return fmt.Errorf("subscriber cannot be nil")
-	}
-
-	id := subscriber.ID()
-	if id == "" {
-		return fmt.Errorf("subscriber ID cannot be empty")
+	id, err := validateSubscriber(subscriber)
+	if err != nil {
+		return err
 	}
 
 	ens.mu.Lock()
 	defer ens.mu.Unlock()
 
-	// Check for duplicate subscriber IDs
+	if err := ens.checkDuplicateSubscriber(id); err != nil {
+		return err
+	}
+
+	ens.registerSubscriberMetadata(id, subscriber)
+	ens.registerSubscriberRouting(id, subscriber)
+	ens.updateSubscriptionMetrics()
+
+	filters := subscriber.GetSubscriptionFilters()
+	ens.logger("Subscribed event listener '%s' with filters: %v", id, filters)
+	return nil
+}
+
+// validateSubscriber checks if the subscriber is valid and returns its ID.
+func validateSubscriber(subscriber EventSubscriber) (string, error) {
+	if subscriber == nil {
+		return "", fmt.Errorf("subscriber cannot be nil")
+	}
+
+	id := subscriber.ID()
+	if id == "" {
+		return "", fmt.Errorf("subscriber ID cannot be empty")
+	}
+
+	return id, nil
+}
+
+// checkDuplicateSubscriber verifies no subscriber with the given ID already exists.
+func (ens *EventNotificationSystem) checkDuplicateSubscriber(id string) error {
 	if _, exists := ens.subscribers[id]; exists {
 		return fmt.Errorf("subscriber with ID '%s' already exists", id)
 	}
+	return nil
+}
 
-	// Store subscriber and metadata
+// registerSubscriberMetadata stores the subscriber and its metadata.
+func (ens *EventNotificationSystem) registerSubscriberMetadata(id string, subscriber EventSubscriber) {
 	ens.subscribers[id] = subscriber
 	ens.subscriberInfo[id] = &SubscriberInfo{
 		ID:            id,
@@ -243,33 +270,45 @@ func (ens *EventNotificationSystem) Subscribe(subscriber EventSubscriber) error 
 		Status:        "active",
 		SubscribeTime: time.Now(),
 	}
+}
 
-	// Register in type-based lookup for efficient routing
+// registerSubscriberRouting registers the subscriber in type-based lookup for efficient event routing.
+func (ens *EventNotificationSystem) registerSubscriberRouting(id string, subscriber EventSubscriber) {
 	filters := subscriber.GetSubscriptionFilters()
 	if len(filters) == 0 {
-		// Subscribe to all event types (global subscriber)
-		allEventTypes := getAllEventTypes()
-		for _, eventType := range allEventTypes {
-			if ens.typeSubscribers[eventType] == nil {
-				ens.typeSubscribers[eventType] = make([]string, 0)
-			}
-			ens.typeSubscribers[eventType] = append(ens.typeSubscribers[eventType], id)
-		}
+		ens.registerSubscriberForAllEventTypes(id)
 	} else {
-		// Subscribe to specific event types
-		for _, eventType := range filters {
-			if ens.typeSubscribers[eventType] == nil {
-				ens.typeSubscribers[eventType] = make([]string, 0)
-			}
-			ens.typeSubscribers[eventType] = append(ens.typeSubscribers[eventType], id)
-		}
+		ens.registerSubscriberForSpecificEventTypes(id, filters)
 	}
+}
 
+// registerSubscriberForAllEventTypes subscribes a subscriber to all available event types.
+func (ens *EventNotificationSystem) registerSubscriberForAllEventTypes(id string) {
+	allEventTypes := getAllEventTypes()
+	for _, eventType := range allEventTypes {
+		ens.addSubscriberToEventType(eventType, id)
+	}
+}
+
+// registerSubscriberForSpecificEventTypes subscribes a subscriber to specified event types.
+func (ens *EventNotificationSystem) registerSubscriberForSpecificEventTypes(id string, filters []EventType) {
+	for _, eventType := range filters {
+		ens.addSubscriberToEventType(eventType, id)
+	}
+}
+
+// addSubscriberToEventType adds a subscriber ID to the list for a given event type.
+func (ens *EventNotificationSystem) addSubscriberToEventType(eventType EventType, id string) {
+	if ens.typeSubscribers[eventType] == nil {
+		ens.typeSubscribers[eventType] = make([]string, 0)
+	}
+	ens.typeSubscribers[eventType] = append(ens.typeSubscribers[eventType], id)
+}
+
+// updateSubscriptionMetrics increments subscription counters.
+func (ens *EventNotificationSystem) updateSubscriptionMetrics() {
 	ens.metrics.TotalSubscribers++
 	ens.metrics.ActiveSubscribers++
-
-	ens.logger("Subscribed event listener '%s' with filters: %v", id, filters)
-	return nil
 }
 
 // Unsubscribe removes an event subscriber
