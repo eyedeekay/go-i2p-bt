@@ -413,39 +413,37 @@ func (as *AnalyticsSubscriber) printDashboard() {
 
 // Example usage and demonstration
 
-func demonstrateEventAnalytics() {
-	fmt.Println("=== Event-Driven Analytics Integration Example ===")
-
-	// Create event notification system
+// setupAnalyticsSystem creates and configures the event notification system with analytics subscriber.
+// It returns the configured event system, analytics subscriber, and a context cancellation function.
+func setupAnalyticsSystem() (*rpc.EventNotificationSystem, *AnalyticsSubscriber, context.CancelFunc) {
 	ens := rpc.NewEventNotificationSystem()
 	ens.SetLogger(func(format string, args ...interface{}) {
 		log.Printf("[EventSystem] "+format, args...)
 	})
 
-	// Create analytics subscriber
 	analytics := NewAnalyticsSubscriber()
 
-	// Subscribe analytics to events
 	if err := ens.Subscribe(analytics); err != nil {
 		log.Fatalf("Failed to subscribe analytics: %v", err)
 	}
 
-	// Start real-time dashboard
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
 	analytics.StartDashboard(ctx, 2*time.Second)
 
-	// Simulate various events
-	fmt.Println("\n--- Simulating Torrent Events ---")
+	return ens, analytics, cancel
+}
 
-	// Session start
+// simulateSessionStart publishes a session start event with startup metadata.
+func simulateSessionStart(ens *rpc.EventNotificationSystem) {
 	ens.PublishSessionEvent(rpc.EventSessionStarted, map[string]interface{}{
 		"startup_time": time.Now(),
 	})
+}
 
-	// Add some torrents
-	for i := 1; i <= 5; i++ {
+// simulateTorrentAdditions publishes torrent addition events for the specified count of torrents.
+// Each event includes torrent metadata and waits briefly between publications for realistic timing.
+func simulateTorrentAdditions(ens *rpc.EventNotificationSystem, count int) {
+	for i := 1; i <= count; i++ {
 		torrent := &rpc.TorrentState{
 			ID:          int64(i),
 			Status:      rpc.TorrentStatusDownloading,
@@ -457,11 +455,13 @@ func demonstrateEventAnalytics() {
 			"priority": "normal",
 		})
 
-		time.Sleep(200 * time.Millisecond) // Small delay for realistic timing
+		time.Sleep(200 * time.Millisecond)
 	}
+}
 
-	// Start some torrents
-	for i := 1; i <= 5; i++ {
+// simulateTorrentStarts publishes torrent start events for the specified count of torrents.
+func simulateTorrentStarts(ens *rpc.EventNotificationSystem, count int) {
+	for i := 1; i <= count; i++ {
 		torrent := &rpc.TorrentState{
 			ID:     int64(i),
 			Status: rpc.TorrentStatusDownloading,
@@ -473,9 +473,12 @@ func demonstrateEventAnalytics() {
 
 		time.Sleep(100 * time.Millisecond)
 	}
+}
 
-	// Complete some torrents
-	for i := 1; i <= 3; i++ {
+// simulateTorrentCompletions publishes torrent completion events for the specified count of torrents.
+// Each completion includes timing metadata and calculated file sizes.
+func simulateTorrentCompletions(ens *rpc.EventNotificationSystem, count int) {
+	for i := 1; i <= count; i++ {
 		torrent := &rpc.TorrentState{
 			ID:     int64(i),
 			Status: rpc.TorrentStatusSeeding,
@@ -483,58 +486,79 @@ func demonstrateEventAnalytics() {
 
 		ens.PublishTorrentEvent(rpc.EventTorrentCompleted, torrent, map[string]interface{}{
 			"completion_time": time.Now(),
-			"size":            int64(i * 1024 * 1024), // i MB
+			"size":            int64(i * 1024 * 1024),
 		})
 
 		time.Sleep(150 * time.Millisecond)
 	}
+}
 
-	// Simulate some errors
-	for i := 4; i <= 5; i++ {
+// simulateTorrentErrors publishes torrent error events for torrents in the specified ID range.
+// The last torrent in the range triggers a simulated processing error for testing error handling.
+func simulateTorrentErrors(ens *rpc.EventNotificationSystem, startID, endID int) {
+	for i := startID; i <= endID; i++ {
 		ens.PublishErrorEvent(rpc.EventTorrentError,
 			fmt.Errorf("failed to download torrent %d", i),
 			map[string]interface{}{
 				"torrent_id":                i,
 				"error_type":                "network_error",
-				"simulate_processing_error": i == 5, // Simulate processing error for torrent 5
+				"simulate_processing_error": i == endID,
 			})
 
 		time.Sleep(100 * time.Millisecond)
 	}
+}
 
-	// Configuration change
+// simulateConfigChange publishes a session configuration change event with new settings.
+func simulateConfigChange(ens *rpc.EventNotificationSystem) {
 	ens.PublishSessionEvent(rpc.EventSessionConfigChanged, map[string]interface{}{
 		"changes": map[string]interface{}{
 			"download_dir": "/new/downloads",
 			"max_peers":    100,
 		},
 	})
+}
 
-	// Wait for dashboard updates
-	fmt.Println("\n--- Waiting for Real-time Updates ---")
-	time.Sleep(5 * time.Second)
-
-	// Generate and print final report
+// displayAnalyticsReports generates and prints comprehensive analytics reports including
+// statistics summaries, event counts, and last event timestamps.
+func displayAnalyticsReports(analytics *AnalyticsSubscriber) {
 	fmt.Println("\n--- Final Analytics Report ---")
 	fmt.Println(analytics.GenerateReport())
 
-	// Show event counts
 	fmt.Println("Event Count Details:")
 	eventCounts := analytics.GetEventCounts()
 	for eventType, count := range eventCounts {
 		fmt.Printf("  %s: %d\n", eventType, count)
 	}
 
-	// Show last event times
 	fmt.Println("\nLast Event Times:")
 	lastEvents := analytics.GetLastEventTimes()
 	for eventType, lastTime := range lastEvents {
 		fmt.Printf("  %s: %v\n", eventType, lastTime.Format(time.RFC3339))
 	}
+}
 
-	// Cleanup
+func demonstrateEventAnalytics() {
+	fmt.Println("=== Event-Driven Analytics Integration Example ===")
+
+	ens, analytics, cancel := setupAnalyticsSystem()
+	defer cancel()
+
+	fmt.Println("\n--- Simulating Torrent Events ---")
+
+	simulateSessionStart(ens)
+	simulateTorrentAdditions(ens, 5)
+	simulateTorrentStarts(ens, 5)
+	simulateTorrentCompletions(ens, 3)
+	simulateTorrentErrors(ens, 4, 5)
+	simulateConfigChange(ens)
+
+	fmt.Println("\n--- Waiting for Real-time Updates ---")
+	time.Sleep(5 * time.Second)
+
+	displayAnalyticsReports(analytics)
+
 	fmt.Println("\n--- Cleanup ---")
-
 	if err := ens.Shutdown(); err != nil {
 		log.Printf("Event system shutdown failed: %v", err)
 	}
