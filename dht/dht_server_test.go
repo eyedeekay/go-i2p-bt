@@ -63,6 +63,29 @@ func (pm *testPeerManager) GetPeers(infohash metainfo.Hash, maxnum int,
 	return
 }
 
+func (pm *testPeerManager) GetSampleInfoHashes(target metainfo.Hash, maxnum int) (samples []metainfo.Hash, num int) {
+	pm.lock.RLock()
+	defer pm.lock.RUnlock()
+
+	num = len(pm.peers)
+	if num == 0 {
+		return nil, 0
+	}
+
+	allHashes := make([]metainfo.Hash, 0, num)
+	for hash := range pm.peers {
+		allHashes = append(allHashes, hash)
+	}
+
+	if len(allHashes) <= maxnum {
+		return allHashes, num
+	}
+
+	samples = make([]metainfo.Hash, maxnum)
+	copy(samples, allHashes[:maxnum])
+	return samples, num
+}
+
 func onSearch(infohash string, ip net.Addr) {
 	// addr := net.JoinHostPort(ip.String(), strconv.FormatUint(uint64(port), 10))
 	fmt.Printf("%s is searching %s\n", ip.String(), infohash)

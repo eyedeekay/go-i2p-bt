@@ -101,3 +101,197 @@ func TestUtMetadataExtendedMsg(t *testing.T) {
 		t.Fail()
 	}
 }
+
+// TestUtPexExtendedMsg_IPv4 tests PEX message encoding/decoding with IPv4 addresses
+func TestUtPexExtendedMsg_IPv4(t *testing.T) {
+	// Create a PEX message with IPv4 peers
+	originalMsg := UtPexExtendedMsg{
+		Added: []CompactPeer{
+			{IP: CompactIP([]byte{192, 168, 1, 1}), Port: 6881},
+			{IP: CompactIP([]byte{10, 0, 0, 1}), Port: 6882},
+		},
+		AddedF: []byte{0x00, 0x02}, // Second peer prefers encryption
+		Dropped: []CompactPeer{
+			{IP: CompactIP([]byte{172, 16, 0, 1}), Port: 6883},
+		},
+	}
+
+	// Encode to bytes
+	encoded, err := originalMsg.EncodeToBytes()
+	if err != nil {
+		t.Fatalf("Failed to encode PEX message: %v", err)
+	}
+
+	// Decode back
+	var decodedMsg UtPexExtendedMsg
+	if err := decodedMsg.DecodeFromPayload(encoded); err != nil {
+		t.Fatalf("Failed to decode PEX message: %v", err)
+	}
+
+	// Verify added peers
+	if len(decodedMsg.Added) != 2 {
+		t.Errorf("Expected 2 added peers, got %d", len(decodedMsg.Added))
+	}
+	if decodedMsg.Added[0].Port != 6881 {
+		t.Errorf("Expected port 6881, got %d", decodedMsg.Added[0].Port)
+	}
+	if decodedMsg.Added[1].Port != 6882 {
+		t.Errorf("Expected port 6882, got %d", decodedMsg.Added[1].Port)
+	}
+
+	// Verify flags
+	if len(decodedMsg.AddedF) != 2 {
+		t.Errorf("Expected 2 flags, got %d", len(decodedMsg.AddedF))
+	}
+	if decodedMsg.AddedF[1] != 0x02 {
+		t.Errorf("Expected flag 0x02, got 0x%02x", decodedMsg.AddedF[1])
+	}
+
+	// Verify dropped peers
+	if len(decodedMsg.Dropped) != 1 {
+		t.Errorf("Expected 1 dropped peer, got %d", len(decodedMsg.Dropped))
+	}
+	if decodedMsg.Dropped[0].Port != 6883 {
+		t.Errorf("Expected port 6883, got %d", decodedMsg.Dropped[0].Port)
+	}
+}
+
+// TestUtPexExtendedMsg_IPv6 tests PEX message encoding/decoding with IPv6 addresses
+func TestUtPexExtendedMsg_IPv6(t *testing.T) {
+	// Create IPv6 addresses
+	ipv6_1 := []byte{0x20, 0x01, 0x0d, 0xb8, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01}
+	ipv6_2 := []byte{0xfe, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01}
+
+	originalMsg := UtPexExtendedMsg{
+		Added6: []CompactPeer{
+			{IP: CompactIP(ipv6_1), Port: 6881},
+			{IP: CompactIP(ipv6_2), Port: 6882},
+		},
+		Added6F: []byte{0x00, 0x01}, // Second peer is a seed
+		Dropped6: []CompactPeer{
+			{IP: CompactIP(ipv6_1), Port: 6883},
+		},
+	}
+
+	// Encode and decode
+	encoded, err := originalMsg.EncodeToBytes()
+	if err != nil {
+		t.Fatalf("Failed to encode IPv6 PEX message: %v", err)
+	}
+
+	var decodedMsg UtPexExtendedMsg
+	if err := decodedMsg.DecodeFromPayload(encoded); err != nil {
+		t.Fatalf("Failed to decode IPv6 PEX message: %v", err)
+	}
+
+	// Verify IPv6 peers
+	if len(decodedMsg.Added6) != 2 {
+		t.Errorf("Expected 2 IPv6 added peers, got %d", len(decodedMsg.Added6))
+	}
+	if len(decodedMsg.Added6F) != 2 {
+		t.Errorf("Expected 2 IPv6 flags, got %d", len(decodedMsg.Added6F))
+	}
+	if len(decodedMsg.Dropped6) != 1 {
+		t.Errorf("Expected 1 IPv6 dropped peer, got %d", len(decodedMsg.Dropped6))
+	}
+}
+
+// TestUtPexExtendedMsg_Empty tests encoding/decoding of empty PEX messages
+func TestUtPexExtendedMsg_Empty(t *testing.T) {
+	originalMsg := UtPexExtendedMsg{}
+
+	encoded, err := originalMsg.EncodeToBytes()
+	if err != nil {
+		t.Fatalf("Failed to encode empty PEX message: %v", err)
+	}
+
+	var decodedMsg UtPexExtendedMsg
+	if err := decodedMsg.DecodeFromPayload(encoded); err != nil {
+		t.Fatalf("Failed to decode empty PEX message: %v", err)
+	}
+
+	// Verify all fields are empty
+	if len(decodedMsg.Added) != 0 || len(decodedMsg.Added6) != 0 ||
+		len(decodedMsg.Dropped) != 0 || len(decodedMsg.Dropped6) != 0 {
+		t.Error("Decoded empty message should have no peers")
+	}
+}
+
+// TestUtPexExtendedMsg_Mixed tests PEX with both IPv4 and IPv6 peers
+func TestUtPexExtendedMsg_Mixed(t *testing.T) {
+	ipv6 := []byte{0x20, 0x01, 0x0d, 0xb8, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01}
+
+	originalMsg := UtPexExtendedMsg{
+		Added: []CompactPeer{
+			{IP: CompactIP([]byte{192, 168, 1, 1}), Port: 6881},
+		},
+		AddedF: []byte{0x00},
+		Added6: []CompactPeer{
+			{IP: CompactIP(ipv6), Port: 6882},
+		},
+		Added6F: []byte{0x01},
+		Dropped: []CompactPeer{
+			{IP: CompactIP([]byte{10, 0, 0, 1}), Port: 6883},
+		},
+		Dropped6: []CompactPeer{
+			{IP: CompactIP(ipv6), Port: 6884},
+		},
+	}
+
+	// Encode and decode
+	encoded, err := originalMsg.EncodeToBytes()
+	if err != nil {
+		t.Fatalf("Failed to encode mixed PEX message: %v", err)
+	}
+
+	var decodedMsg UtPexExtendedMsg
+	if err := decodedMsg.DecodeFromPayload(encoded); err != nil {
+		t.Fatalf("Failed to decode mixed PEX message: %v", err)
+	}
+
+	// Verify both IPv4 and IPv6 peers are present
+	if len(decodedMsg.Added) != 1 {
+		t.Errorf("Expected 1 IPv4 added peer, got %d", len(decodedMsg.Added))
+	}
+	if len(decodedMsg.Added6) != 1 {
+		t.Errorf("Expected 1 IPv6 added peer, got %d", len(decodedMsg.Added6))
+	}
+	if len(decodedMsg.Dropped) != 1 {
+		t.Errorf("Expected 1 IPv4 dropped peer, got %d", len(decodedMsg.Dropped))
+	}
+	if len(decodedMsg.Dropped6) != 1 {
+		t.Errorf("Expected 1 IPv6 dropped peer, got %d", len(decodedMsg.Dropped6))
+	}
+}
+
+// TestUtPexExtendedMsg_EncodeToPayload tests the buffer-based encoding
+func TestUtPexExtendedMsg_EncodeToPayload(t *testing.T) {
+	msg := UtPexExtendedMsg{
+		Added: []CompactPeer{
+			{IP: CompactIP([]byte{192, 168, 1, 1}), Port: 6881},
+		},
+		AddedF: []byte{0x00},
+	}
+
+	buf := new(bytes.Buffer)
+	if err := msg.EncodeToPayload(buf); err != nil {
+		t.Fatalf("EncodeToPayload failed: %v", err)
+	}
+
+	if buf.Len() == 0 {
+		t.Error("Encoded payload should not be empty")
+	}
+
+	// Verify we can decode what was encoded
+	var decodedMsg UtPexExtendedMsg
+	if err := decodedMsg.DecodeFromPayload(buf.Bytes()); err != nil {
+		t.Fatalf("Failed to decode payload: %v", err)
+	}
+
+	if len(decodedMsg.Added) != 1 {
+		t.Errorf("Expected 1 added peer after decode, got %d", len(decodedMsg.Added))
+	}
+}

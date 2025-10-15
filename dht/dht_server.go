@@ -32,10 +32,11 @@ import (
 )
 
 const (
-	queryMethodPing         = "ping"
-	queryMethodFindNode     = "find_node"
-	queryMethodGetPeers     = "get_peers"
-	queryMethodAnnouncePeer = "announce_peer"
+	queryMethodPing           = "ping"
+	queryMethodFindNode       = "find_node"
+	queryMethodGetPeers       = "get_peers"
+	queryMethodAnnouncePeer   = "announce_peer"
+	queryMethodSampleInfoHash = "sample_infohashes" // BEP 33
 )
 
 var errUnsupportedIPProtocol = fmt.Errorf("unsupported ip protocol")
@@ -539,6 +540,8 @@ func (s *Server) handleQuery(raddr net.Addr, m krpc.Message) {
 		s.handleGetPeersQuery(raddr, m)
 	case queryMethodAnnouncePeer:
 		s.handleAnnouncePeerQuery(raddr, m)
+	case queryMethodSampleInfoHash:
+		s.handleSampleInfoHashQuery(raddr, m)
 	default:
 		s.sendError(raddr, m.T, "unknown query method", krpc.ErrorCodeMethodUnknown)
 	}
@@ -588,6 +591,30 @@ func (s *Server) handleAnnouncePeerQuery(raddr net.Addr, m krpc.Message) {
 	}
 	s.reply(raddr, m.T, krpc.ResponseResult{})
 	s.conf.OnTorrent(m.A.InfoHash.HexString(), raddr)
+}
+
+// handleSampleInfoHashQuery processes sample_infohashes queries as defined in BEP 33.
+// This allows nodes to discover what torrents are being shared by other nodes.
+func (s *Server) handleSampleInfoHashQuery(raddr net.Addr, m krpc.Message) {
+	var r krpc.ResponseResult
+
+	// Get sample infohashes from peer manager
+	samples, num := s.peerManager.GetSampleInfoHashes(m.A.Target, s.conf.K)
+	r.Samples = samples
+	r.Num = num
+	r.Interval = 300 // 5 minutes, as suggested by BEP 33
+
+	// Also provide nodes for further lookups
+	n4 := m.A.ContainsWant(krpc.WantNodes)
+	n6 := m.A.ContainsWant(krpc.WantNodes6)
+
+	if !n4 && !n6 {
+		s.populateNodesBasedOnAddress(raddr, m.A.Target, &r)
+	} else {
+		s.populateRequestedNodes(n4, n6, m.A.Target, &r)
+	}
+
+	s.reply(raddr, m.T, r)
 }
 
 // populateNodesBasedOnAddress populates response nodes based on the requester's IP version.

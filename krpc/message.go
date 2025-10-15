@@ -290,6 +290,22 @@ type ResponseResult struct {
 	//
 	// get_peers
 	Values CompactAddresses `bencode:"values,omitempty"` // BEP 5
+
+	// Samples is a list of sample infohashes returned by sample_infohashes query.
+	//
+	// sample_infohashes
+	Samples []metainfo.Hash `bencode:"samples,omitempty"` // BEP 33
+
+	// Num is the number of infohashes the node has stored.
+	//
+	// sample_infohashes
+	Num int `bencode:"num,omitempty"` // BEP 33
+
+	// Interval is the time in seconds that a querying node should wait
+	// before querying again.
+	//
+	// sample_infohashes
+	Interval int `bencode:"interval,omitempty"` // BEP 33
 }
 
 /// >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>

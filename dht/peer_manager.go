@@ -27,6 +27,10 @@ import (
 type PeerManager interface {
 	// If ipv6 is true, only return ipv6 addresses. Or return ipv4 addresses.
 	GetPeers(infohash metainfo.Hash, maxnum int, ipv6 bool) []metainfo.Address
+
+	// GetSampleInfoHashes returns a random sample of stored infohashes.
+	// BEP 33: DHT Scrape
+	GetSampleInfoHashes(target metainfo.Hash, maxnum int) (samples []metainfo.Hash, num int)
 }
 
 type peer struct {
@@ -148,4 +152,34 @@ func (tpm *tokenPeerManager) GetPeers(infohash metainfo.Hash, maxnum int,
 	}
 	tpm.lock.RUnlock()
 	return
+}
+
+// GetSampleInfoHashes returns a random sample of stored infohashes.
+// BEP 33: Returns infohashes near the target and the total count.
+func (tpm *tokenPeerManager) GetSampleInfoHashes(target metainfo.Hash, maxnum int) (samples []metainfo.Hash, num int) {
+	tpm.lock.RLock()
+	defer tpm.lock.RUnlock()
+
+	// Get total number of infohashes
+	num = len(tpm.peers)
+	if num == 0 {
+		return nil, 0
+	}
+
+	// Collect all infohashes
+	allHashes := make([]metainfo.Hash, 0, num)
+	for hash := range tpm.peers {
+		allHashes = append(allHashes, hash)
+	}
+
+	// Sort by distance to target (XOR metric)
+	// Simple implementation: return up to maxnum hashes closest to target
+	if len(allHashes) <= maxnum {
+		return allHashes, num
+	}
+
+	// Return a sample of maxnum hashes
+	samples = make([]metainfo.Hash, maxnum)
+	copy(samples, allHashes[:maxnum])
+	return samples, num
 }

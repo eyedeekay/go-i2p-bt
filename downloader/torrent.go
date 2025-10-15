@@ -113,7 +113,10 @@ func NewTorrentDownloader(c ...TorrentDownloaderConfig) *TorrentDownloader {
 		responses: make(chan TorrentResponse, 1024),
 
 		ehmsg: pp.ExtendedHandshakeMsg{
-			M: map[string]uint8{pp.ExtendedMessageNameMetadata: 1},
+			M: map[string]uint8{
+				pp.ExtendedMessageNameMetadata: 1,
+				pp.ExtendedMessageNamePex:      2, // BEP 11: Peer Exchange
+			},
 		},
 	}
 
