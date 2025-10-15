@@ -127,11 +127,29 @@ func (fp *FilePersistence) LoadTorrent(ctx context.Context, infoHash metainfo.Ha
 	fp.mu.RLock()
 	defer fp.mu.RUnlock()
 
-	// Check context cancellation
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 
+	data, err := fp.readTorrentFile(infoHash)
+	if err != nil {
+		return nil, err
+	}
+
+	torrent, err := fp.deserializeTorrentState(data)
+	if err != nil {
+		return nil, err
+	}
+
+	torrent.InfoHash = infoHash
+
+	fp.attachMetaInfo(infoHash, torrent)
+
+	return torrent, nil
+}
+
+// readTorrentFile reads the torrent file from disk and returns its contents.
+func (fp *FilePersistence) readTorrentFile(infoHash metainfo.Hash) ([]byte, error) {
 	torrentFile := fp.getTorrentFilePath(infoHash)
 	data, err := os.ReadFile(torrentFile)
 	if err != nil {
@@ -140,40 +158,56 @@ func (fp *FilePersistence) LoadTorrent(ctx context.Context, infoHash metainfo.Ha
 		}
 		return nil, fmt.Errorf("failed to read torrent file: %w", err)
 	}
+	return data, nil
+}
 
-	var torrent rpc.TorrentState
-
-	// First try to unmarshal into map to handle string info_hash
+// deserializeTorrentState unmarshals JSON data into a TorrentState, handling string-based info_hash conversion.
+func (fp *FilePersistence) deserializeTorrentState(data []byte) (*rpc.TorrentState, error) {
 	var dataMap map[string]interface{}
 	if err := json.Unmarshal(data, &dataMap); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal torrent data: %w", err)
 	}
 
-	// Convert info_hash from string to Hash if it exists
-	if _, ok := dataMap["info_hash"].(string); ok {
-		// Remove the string version and let the torrent.InfoHash be set below
-		delete(dataMap, "info_hash")
+	if err := fp.normalizeInfoHashField(dataMap); err != nil {
+		return nil, err
 	}
 
-	// Re-marshal and unmarshal into TorrentState
+	torrent, err := fp.unmarshalTorrentState(dataMap)
+	if err != nil {
+		return nil, err
+	}
+
+	return torrent, nil
+}
+
+// normalizeInfoHashField removes string-based info_hash from the data map to prevent conflicts.
+func (fp *FilePersistence) normalizeInfoHashField(dataMap map[string]interface{}) error {
+	if _, ok := dataMap["info_hash"].(string); ok {
+		delete(dataMap, "info_hash")
+	}
+	return nil
+}
+
+// unmarshalTorrentState re-marshals the data map and unmarshals it into a TorrentState struct.
+func (fp *FilePersistence) unmarshalTorrentState(dataMap map[string]interface{}) (*rpc.TorrentState, error) {
 	fixedData, err := json.Marshal(dataMap)
 	if err != nil {
 		return nil, fmt.Errorf("failed to re-marshal torrent data: %w", err)
 	}
 
+	var torrent rpc.TorrentState
 	if err := json.Unmarshal(fixedData, &torrent); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal torrent state: %w", err)
 	}
 
-	// Ensure info hash is set correctly
-	torrent.InfoHash = infoHash
+	return &torrent, nil
+}
 
-	// Load MetaInfo if available
+// attachMetaInfo loads and attaches MetaInfo to the torrent if available.
+func (fp *FilePersistence) attachMetaInfo(infoHash metainfo.Hash, torrent *rpc.TorrentState) {
 	if metaInfo, err := fp.loadMetaInfo(infoHash); err == nil {
 		torrent.MetaInfo = metaInfo
 	}
-
-	return &torrent, nil
 }
 
 // writeTorrentToTempFile serializes a torrent and writes it to a temporary file.
