@@ -317,57 +317,73 @@ func (hm *HookManager) executeHooksWithContext(hookCtx *HookContext) {
 // executeHooksAsync executes hooks asynchronously with proper error handling and metrics
 func (hm *HookManager) executeHooksAsync(hookCtx *HookContext, hooks []*Hook) {
 	start := time.Now()
-	defer func() {
-		hm.mu.Lock()
-		hm.metrics.TotalExecutions++
-		hm.metrics.AverageLatency = (hm.metrics.AverageLatency + time.Since(start)) / 2
-		hm.mu.Unlock()
-	}()
+	defer hm.updateExecutionMetrics(start)
 
 	for _, hook := range hooks {
-		func(h *Hook) {
-			// Create context with timeout
-			ctx, cancel := context.WithTimeout(hookCtx.Context, h.Timeout)
-			defer cancel()
-
-			// Update context in hook context
-			hookCtxCopy := *hookCtx
-			hookCtxCopy.Context = ctx
-
-			// Execute hook with timeout
-			done := make(chan error, 1)
-			go func() {
-				defer func() {
-					if r := recover(); r != nil {
-						hm.mu.Lock()
-						hm.metrics.TotalErrors++
-						hm.mu.Unlock()
-						hm.logger("Hook '%s' panicked: %v", h.ID, r)
-						done <- fmt.Errorf("hook panicked: %v", r)
-					}
-				}()
-				done <- h.Callback(&hookCtxCopy)
-			}()
-
-			select {
-			case err := <-done:
-				if err != nil {
-					hm.mu.Lock()
-					hm.metrics.TotalErrors++
-					hm.mu.Unlock()
-					hm.logger("Hook '%s' failed for event '%s': %v", h.ID, hookCtx.Event, err)
-					if !h.ContinueOnError {
-						return
-					}
-				}
-			case <-ctx.Done():
-				hm.mu.Lock()
-				hm.metrics.TotalTimeouts++
-				hm.mu.Unlock()
-				hm.logger("Hook '%s' timed out for event '%s'", h.ID, hookCtx.Event)
-			}
-		}(hook)
+		hm.executeHookWithTimeout(hookCtx, hook)
 	}
+}
+
+// updateExecutionMetrics updates hook execution metrics after completion.
+func (hm *HookManager) updateExecutionMetrics(start time.Time) {
+	hm.mu.Lock()
+	hm.metrics.TotalExecutions++
+	hm.metrics.AverageLatency = (hm.metrics.AverageLatency + time.Since(start)) / 2
+	hm.mu.Unlock()
+}
+
+// executeHookWithTimeout executes a single hook with timeout and panic recovery.
+func (hm *HookManager) executeHookWithTimeout(hookCtx *HookContext, h *Hook) {
+	ctx, cancel := context.WithTimeout(hookCtx.Context, h.Timeout)
+	defer cancel()
+
+	hookCtxCopy := *hookCtx
+	hookCtxCopy.Context = ctx
+
+	done := make(chan error, 1)
+	go hm.runHookWithRecovery(h, &hookCtxCopy, done)
+
+	hm.handleHookResult(ctx, h, hookCtx.Event, done)
+}
+
+// runHookWithRecovery runs a hook callback with panic recovery.
+func (hm *HookManager) runHookWithRecovery(h *Hook, hookCtx *HookContext, done chan error) {
+	defer func() {
+		if r := recover(); r != nil {
+			hm.incrementErrorMetric()
+			hm.logger("Hook '%s' panicked: %v", h.ID, r)
+			done <- fmt.Errorf("hook panicked: %v", r)
+		}
+	}()
+	done <- h.Callback(hookCtx)
+}
+
+// handleHookResult processes the result of hook execution or timeout.
+func (hm *HookManager) handleHookResult(ctx context.Context, h *Hook, event HookEvent, done chan error) {
+	select {
+	case err := <-done:
+		if err != nil {
+			hm.incrementErrorMetric()
+			hm.logger("Hook '%s' failed for event '%s': %v", h.ID, event, err)
+		}
+	case <-ctx.Done():
+		hm.incrementTimeoutMetric()
+		hm.logger("Hook '%s' timed out for event '%s'", h.ID, event)
+	}
+}
+
+// incrementErrorMetric safely increments the error counter.
+func (hm *HookManager) incrementErrorMetric() {
+	hm.mu.Lock()
+	hm.metrics.TotalErrors++
+	hm.mu.Unlock()
+}
+
+// incrementTimeoutMetric safely increments the timeout counter.
+func (hm *HookManager) incrementTimeoutMetric() {
+	hm.mu.Lock()
+	hm.metrics.TotalTimeouts++
+	hm.mu.Unlock()
 }
 
 // GetMetrics returns current hook execution metrics

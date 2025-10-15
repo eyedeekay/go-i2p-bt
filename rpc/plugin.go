@@ -565,10 +565,35 @@ func (pm *PluginManager) ListPluginsByType() map[string][]string {
 
 // ValidatePlugin performs basic validation of a plugin implementation
 func ValidatePlugin(plugin Plugin) error {
+	if err := validatePluginNotNil(plugin); err != nil {
+		return err
+	}
+
+	if err := validatePluginMetadata(plugin); err != nil {
+		return err
+	}
+
+	if err := validateBehaviorPluginInterface(plugin); err != nil {
+		return err
+	}
+
+	if err := validateInterceptorPluginInterface(plugin); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// validatePluginNotNil checks if the plugin is not nil.
+func validatePluginNotNil(plugin Plugin) error {
 	if plugin == nil {
 		return fmt.Errorf("plugin cannot be nil")
 	}
+	return nil
+}
 
+// validatePluginMetadata validates that plugin metadata fields are not empty.
+func validatePluginMetadata(plugin Plugin) error {
 	if plugin.ID() == "" {
 		return fmt.Errorf("plugin ID cannot be empty")
 	}
@@ -581,19 +606,25 @@ func ValidatePlugin(plugin Plugin) error {
 		return fmt.Errorf("plugin version cannot be empty")
 	}
 
-	// Validate behavior plugin interfaces
+	return nil
+}
+
+// validateBehaviorPluginInterface validates behavior plugin interfaces.
+func validateBehaviorPluginInterface(plugin Plugin) error {
 	if behaviorPlugin, ok := plugin.(BehaviorPlugin); ok {
 		if len(behaviorPlugin.SupportedOperations()) == 0 {
 			return fmt.Errorf("behavior plugin must support at least one operation")
 		}
 	}
+	return nil
+}
 
-	// Validate interceptor plugin interfaces
+// validateInterceptorPluginInterface validates interceptor plugin interfaces.
+func validateInterceptorPluginInterface(plugin Plugin) error {
 	if interceptorPlugin, ok := plugin.(InterceptorPlugin); ok {
 		if len(interceptorPlugin.SupportedMethods()) == 0 {
 			return fmt.Errorf("interceptor plugin must support at least one method")
 		}
 	}
-
 	return nil
 }
