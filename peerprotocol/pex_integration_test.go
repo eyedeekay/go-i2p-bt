@@ -33,11 +33,11 @@ func TestPEXIntegration_FullFlow(t *testing.T) {
 	// Both peers advertise PEX support in extended handshake
 	peer1.ExtendedHandshakeMsg.M = map[string]uint8{
 		"ut_metadata": 1,
-		"ut_pex":      2,
+		"i2p_pex":     2,
 	}
 	peer2.ExtendedHandshakeMsg.M = map[string]uint8{
 		"ut_metadata": 1,
-		"ut_pex":      2,
+		"i2p_pex":     2,
 	}
 
 	// Create PEX handlers for both peers
@@ -119,8 +119,8 @@ func TestPEXIntegration_BidirectionalExchange(t *testing.T) {
 	peer2 := createMockPeerConn(t, "192.168.1.2:6882")
 
 	// Both peers advertise PEX support
-	peer1.ExtendedHandshakeMsg.M = map[string]uint8{"ut_pex": 2}
-	peer2.ExtendedHandshakeMsg.M = map[string]uint8{"ut_pex": 2}
+	peer1.ExtendedHandshakeMsg.M = map[string]uint8{"i2p_pex": 2}
+	peer2.ExtendedHandshakeMsg.M = map[string]uint8{"i2p_pex": 2}
 
 	handler1 := NewDefaultPEXHandler(60 * time.Second)
 	handler2 := NewDefaultPEXHandler(60 * time.Second)
@@ -172,8 +172,8 @@ func TestPEXIntegration_DroppedPeers(t *testing.T) {
 	peer1 := createMockPeerConn(t, "192.168.1.1:6881")
 	peer2 := createMockPeerConn(t, "192.168.1.2:6882")
 
-	peer1.ExtendedHandshakeMsg.M = map[string]uint8{"ut_pex": 2}
-	peer2.ExtendedHandshakeMsg.M = map[string]uint8{"ut_pex": 2}
+	peer1.ExtendedHandshakeMsg.M = map[string]uint8{"i2p_pex": 2}
+	peer2.ExtendedHandshakeMsg.M = map[string]uint8{"i2p_pex": 2}
 
 	handler1 := NewDefaultPEXHandler(60 * time.Second)
 	handler2 := NewDefaultPEXHandler(60 * time.Second)
@@ -219,8 +219,8 @@ func TestPEXIntegration_IPv6Support(t *testing.T) {
 	peer1 := createMockPeerConn(t, "192.168.1.1:6881")
 	peer2 := createMockPeerConn(t, "192.168.1.2:6882")
 
-	peer1.ExtendedHandshakeMsg.M = map[string]uint8{"ut_pex": 2}
-	peer2.ExtendedHandshakeMsg.M = map[string]uint8{"ut_pex": 2}
+	peer1.ExtendedHandshakeMsg.M = map[string]uint8{"i2p_pex": 2}
+	peer2.ExtendedHandshakeMsg.M = map[string]uint8{"i2p_pex": 2}
 
 	handler1 := NewDefaultPEXHandler(60 * time.Second)
 	handler2 := NewDefaultPEXHandler(60 * time.Second)
@@ -270,9 +270,9 @@ func TestPEXIntegration_NoSupport(t *testing.T) {
 	peer2 := createMockPeerConn(t, "192.168.1.2:6882")
 
 	// Peer1 supports PEX
-	peer1.ExtendedHandshakeMsg.M = map[string]uint8{"ut_pex": 2}
+	peer1.ExtendedHandshakeMsg.M = map[string]uint8{"i2p_pex": 2}
 
-	// Peer2 does NOT support PEX (no ut_pex in M map)
+	// Peer2 does NOT support PEX (no i2p_pex in M map)
 	peer2.ExtendedHandshakeMsg.M = map[string]uint8{"ut_metadata": 1}
 
 	handler1 := NewDefaultPEXHandler(60 * time.Second)

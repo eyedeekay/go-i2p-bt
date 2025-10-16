@@ -150,8 +150,8 @@ func (h *DefaultPEXHandler) DropPeer(peerKey string, peer CompactPeer) {
 // It generates the message using the handler and encodes it properly.
 // Returns nil if the peer doesn't support PEX or no message needs to be sent.
 func SendPEXMessage(conn *PeerConn, handler PEXHandler) error {
-	// Check if peer supports PEX
-	pexID, ok := conn.ExtendedHandshakeMsg.M["ut_pex"]
+	// Check if peer supports PEX (I2P uses "i2p_pex" extension name)
+	pexID, ok := conn.ExtendedHandshakeMsg.M[ExtendedMessageNamePex]
 	if !ok || pexID == 0 {
 		return nil // Peer doesn't support PEX
 	}

@@ -115,7 +115,7 @@ func NewTorrentDownloader(c ...TorrentDownloaderConfig) *TorrentDownloader {
 		ehmsg: pp.ExtendedHandshakeMsg{
 			M: map[string]uint8{
 				pp.ExtendedMessageNameMetadata: 1,
-				pp.ExtendedMessageNamePex:      2, // BEP 11: Peer Exchange
+				pp.ExtendedMessageNamePex:      2, // I2P PEX: Peer Exchange (i2p_pex)
 			},
 		},
 	}

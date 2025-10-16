@@ -33,7 +33,7 @@ const (
 // Predefine some extended message names.
 const (
 	ExtendedMessageNameMetadata = "ut_metadata" // BEP 9
-	ExtendedMessageNamePex      = "ut_pex"      // BEP 11
+	ExtendedMessageNamePex      = "i2p_pex"     // I2P PEX (based on BEP 11 ut_pex)
 )
 
 // Predefine some "ut_metadata" extended message types.
@@ -205,8 +205,8 @@ func (cp CompactPeer) String() string {
 	return cp.IP.String() + ":" + string(rune(cp.Port))
 }
 
-// UtPexExtendedMsg represents the "ut_pex" extended message for peer exchange.
-// This implements BEP 11 for peer exchange protocol
+// UtPexExtendedMsg represents the "i2p_pex" extended message for peer exchange.
+// This implements I2P PEX (based on BEP 11 ut_pex) for peer exchange protocol
 type UtPexExtendedMsg struct {
 	// Added peers since last PEX message
 	Added   []CompactPeer `bencode:"added"`
