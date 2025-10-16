@@ -37,6 +37,8 @@ const (
 	queryMethodGetPeers       = "get_peers"
 	queryMethodAnnouncePeer   = "announce_peer"
 	queryMethodSampleInfoHash = "sample_infohashes" // BEP 33
+	queryMethodPut            = "put"               // BEP 44
+	queryMethodGet            = "get"               // BEP 44
 )
 
 var errUnsupportedIPProtocol = fmt.Errorf("unsupported ip protocol")
@@ -254,6 +256,7 @@ type Server struct {
 	tokenManager       *tokenManager
 	tokenPeerManager   *tokenPeerManager
 	transactionManager *transactionManager
+	dataStore          *DataStore // BEP 44
 }
 
 // detectIPProtocols automatically detects supported IP protocols based on connection address.
@@ -303,6 +306,7 @@ func initializeServer(conf Config, conn net.PacketConn, ipv4, ipv6 bool, want []
 		tokenManager:       newTokenManager(),
 		tokenPeerManager:   newTokenPeerManager(),
 		transactionManager: newTransactionManager(),
+		dataStore:          NewDataStore(), // BEP 44
 	}
 
 	s.routingTable4 = newRoutingTable(s, false)
@@ -542,6 +546,10 @@ func (s *Server) handleQuery(raddr net.Addr, m krpc.Message) {
 		s.handleAnnouncePeerQuery(raddr, m)
 	case queryMethodSampleInfoHash:
 		s.handleSampleInfoHashQuery(raddr, m)
+	case queryMethodPut:
+		s.handlePutQuery(raddr, m)
+	case queryMethodGet:
+		s.handleGetQuery(raddr, m)
 	default:
 		s.sendError(raddr, m.T, "unknown query method", krpc.ErrorCodeMethodUnknown)
 	}
@@ -605,6 +613,80 @@ func (s *Server) handleSampleInfoHashQuery(raddr net.Addr, m krpc.Message) {
 	r.Interval = 300 // 5 minutes, as suggested by BEP 33
 
 	// Also provide nodes for further lookups
+	n4 := m.A.ContainsWant(krpc.WantNodes)
+	n6 := m.A.ContainsWant(krpc.WantNodes6)
+
+	if !n4 && !n6 {
+		s.populateNodesBasedOnAddress(raddr, m.A.Target, &r)
+	} else {
+		s.populateRequestedNodes(n4, n6, m.A.Target, &r)
+	}
+
+	s.reply(raddr, m.T, r)
+}
+
+// handlePutQuery processes put queries as defined in BEP 44.
+// This allows storing arbitrary data in the DHT.
+func (s *Server) handlePutQuery(raddr net.Addr, m krpc.Message) {
+	// Validate value size
+	if len(m.A.V) > MaxValueSize {
+		s.sendError(raddr, m.T, "value too large", krpc.ErrorCodeMessageValueFieldTooBig)
+		return
+	}
+
+	// Validate salt size
+	if len(m.A.Salt) > MaxSaltSize {
+		s.sendError(raddr, m.T, "salt too large", krpc.ErrorCodeSaltFieldTooBig)
+		return
+	}
+
+	// Create storage item
+	item := &StorageItem{
+		Value:     m.A.V,
+		IsMutable: len(m.A.K) > 0,
+		PublicKey: m.A.K,
+		Signature: m.A.Sig,
+		Seq:       m.A.Seq,
+		Salt:      m.A.Salt,
+		CAS:       m.A.CAS,
+	}
+
+	// Store the item
+	if err := s.dataStore.Put(item); err != nil {
+		// Map storage errors to KRPC error codes
+		if err.Error() == "invalid signature" {
+			s.sendError(raddr, m.T, err.Error(), krpc.ErrorCodeInvalidSignature)
+		} else if err.Error() == "CAS mismatch: "+err.Error() {
+			s.sendError(raddr, m.T, err.Error(), krpc.ErrorCodeCasHashMismatched)
+		} else if err.Error() == "sequence number must be greater than current: "+err.Error() {
+			s.sendError(raddr, m.T, err.Error(), krpc.ErrorCodeSequenceNumberLessThanCurrent)
+		} else {
+			s.sendError(raddr, m.T, err.Error(), krpc.ErrorCodeServer)
+		}
+		return
+	}
+
+	s.reply(raddr, m.T, krpc.ResponseResult{})
+}
+
+// handleGetQuery processes get queries as defined in BEP 44.
+// This retrieves stored data from the DHT.
+func (s *Server) handleGetQuery(raddr net.Addr, m krpc.Message) {
+	var r krpc.ResponseResult
+
+	// Retrieve item from storage
+	item := s.dataStore.Get(m.A.Target)
+	if item != nil {
+		// Populate response with stored data
+		r.V = item.Value
+		if item.IsMutable {
+			r.K = item.PublicKey
+			r.Sig = item.Signature
+			r.Seq = item.Seq
+		}
+	}
+
+	// Also provide nodes for further lookups (as per BEP 44)
 	n4 := m.A.ContainsWant(krpc.WantNodes)
 	n6 := m.A.ContainsWant(krpc.WantNodes6)
 

@@ -242,6 +242,38 @@ type QueryArg struct {
 	//
 	// find_node, get_peers
 	Wants []Want `bencode:"want,omitempty"` // BEP 32
+
+	// --- BEP 44: Storing arbitrary data in the DHT ---
+
+	// V is the value to store (max 1000 bytes).
+	//
+	// put
+	V []byte `bencode:"v,omitempty"` // BEP 44
+
+	// K is the Ed25519 public key (32 bytes) for mutable data.
+	//
+	// put (mutable)
+	K []byte `bencode:"k,omitempty"` // BEP 44
+
+	// Sig is the Ed25519 signature (64 bytes) for mutable data.
+	//
+	// put (mutable)
+	Sig []byte `bencode:"sig,omitempty"` // BEP 44
+
+	// Seq is the sequence number for mutable data.
+	//
+	// put (mutable), get (optional)
+	Seq int64 `bencode:"seq,omitempty"` // BEP 44
+
+	// Salt is optional salt for mutable data (max 64 bytes).
+	//
+	// put (mutable), get (optional)
+	Salt []byte `bencode:"salt,omitempty"` // BEP 44
+
+	// CAS is the compare-and-swap previous sequence number.
+	//
+	// put (mutable, optional)
+	CAS int64 `bencode:"cas,omitempty"` // BEP 44
 }
 
 // ContainsWant reports whether the request contains the given Want.
@@ -306,6 +338,28 @@ type ResponseResult struct {
 	//
 	// sample_infohashes
 	Interval int `bencode:"interval,omitempty"` // BEP 33
+
+	// --- BEP 44: Storing arbitrary data in the DHT ---
+
+	// V is the stored value (max 1000 bytes).
+	//
+	// get
+	V []byte `bencode:"v,omitempty"` // BEP 44
+
+	// K is the Ed25519 public key (32 bytes) for mutable data.
+	//
+	// get (mutable)
+	K []byte `bencode:"k,omitempty"` // BEP 44
+
+	// Sig is the Ed25519 signature (64 bytes) for mutable data.
+	//
+	// get (mutable)
+	Sig []byte `bencode:"sig,omitempty"` // BEP 44
+
+	// Seq is the sequence number for mutable data.
+	//
+	// get (mutable)
+	Seq int64 `bencode:"seq,omitempty"` // BEP 44
 }
 
 /// >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
