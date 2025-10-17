@@ -19,6 +19,7 @@ package tracker
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -29,7 +30,11 @@ import (
 	"github.com/go-i2p/go-i2p-bt/metainfo"
 	"github.com/go-i2p/go-i2p-bt/tracker/httptracker"
 	"github.com/go-i2p/go-i2p-bt/tracker/udptracker"
+	"github.com/go-i2p/i2pkeys"
 )
+
+// I2P Base64 encoder using I2P alphabet
+var i2pB64enc = base64.NewEncoding("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-~")
 
 // Predefine some announce events.
 //
@@ -63,9 +68,22 @@ type AnnounceRequest struct {
 func (ar *AnnounceRequest) ToHTTPAnnounceRequest() *httptracker.AnnounceRequest {
 	ip := "127.0.0.1"
 	if PeerAddress != nil {
-		ip = PeerAddress.String()
+		// Check if this is an I2P address and encode as Base64 Destination
+		if i2pAddr, ok := PeerAddress.(i2pkeys.I2PAddr); ok {
+			// Get the raw destination bytes and encode with I2P Base64 alphabet
+			destBytes := i2pAddr.Bytes()
+			ip = i2pB64enc.EncodeToString(destBytes) + ".i2p"
+		} else {
+			ip = PeerAddress.String() // Fallback for non-I2P addresses
+		}
 	} else if ar.IP != nil {
-		ip = ar.IP.String()
+		// Check if ar.IP is an I2P address
+		if i2pAddr, ok := ar.IP.(i2pkeys.I2PAddr); ok {
+			destBytes := i2pAddr.Bytes()
+			ip = i2pB64enc.EncodeToString(destBytes) + ".i2p"
+		} else {
+			ip = ar.IP.String() // Fallback for non-I2P addresses
+		}
 	}
 	if ar.Port == 0 {
 		ar.Port = 6881
