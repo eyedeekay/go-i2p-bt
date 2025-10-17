@@ -60,7 +60,7 @@ func NewDatabasePersistence(dbPath string, enableMetrics bool) (*DatabasePersist
 	}
 
 	// Open database connection with default options
-	db, err := bbolt.Open(dbPath, 0600, &bbolt.Options{
+	db, err := bbolt.Open(dbPath, 0o600, &bbolt.Options{
 		Timeout: 1 * time.Second,
 	})
 	if err != nil {
@@ -123,7 +123,6 @@ func (dp *DatabasePersistence) LoadTorrent(ctx context.Context, infoHash metainf
 
 		return json.Unmarshal(jsonData, &torrent)
 	})
-
 	if err != nil {
 		return nil, err
 	}
@@ -190,7 +189,6 @@ func (dp *DatabasePersistence) LoadAllTorrents(ctx context.Context) ([]*rpc.Torr
 			return nil
 		})
 	})
-
 	if err != nil {
 		return nil, err
 	}
@@ -253,7 +251,6 @@ func (dp *DatabasePersistence) LoadSessionConfig(ctx context.Context) (*rpc.Sess
 
 		return json.Unmarshal(jsonData, &config)
 	})
-
 	if err != nil {
 		return nil, err
 	}

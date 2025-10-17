@@ -77,7 +77,6 @@ func TestDownloadRange_Success(t *testing.T) {
 
 	client := NewWebSeedClient()
 	data, err := client.DownloadRange(server.URL, 10, 10)
-
 	if err != nil {
 		t.Fatalf("DownloadRange failed: %v", err)
 	}
@@ -100,7 +99,6 @@ func TestDownloadRange_FullContent(t *testing.T) {
 
 	client := NewWebSeedClient()
 	data, err := client.DownloadRange(server.URL, 0, int64(len(testData)))
-
 	if err != nil {
 		t.Fatalf("DownloadRange failed: %v", err)
 	}
@@ -170,7 +168,6 @@ func TestDownloadRange_Retry(t *testing.T) {
 
 	client := NewWebSeedClient()
 	data, err := client.DownloadRange(server.URL, 0, int64(len(testData)))
-
 	if err != nil {
 		t.Fatalf("Expected success after retries, got error: %v", err)
 	}
@@ -242,7 +239,6 @@ func TestDownloadBlock(t *testing.T) {
 
 	client := NewWebSeedClient()
 	data, err := client.DownloadBlock(server.URL, 1024, int64(len(testData)))
-
 	if err != nil {
 		t.Fatalf("DownloadBlock failed: %v", err)
 	}
@@ -328,7 +324,6 @@ func TestDownloadRange_RangeHeader(t *testing.T) {
 
 	client := NewWebSeedClient()
 	_, err := client.DownloadRange(server.URL, 50, 100)
-
 	if err != nil {
 		t.Fatalf("DownloadRange failed: %v", err)
 	}
@@ -376,7 +371,6 @@ func TestDownloadPiece_LastPiece(t *testing.T) {
 
 	client := NewWebSeedClient()
 	data, err := client.DownloadPiece(server.URL, info, 1) // piece 1 is the last piece
-
 	if err != nil {
 		t.Fatalf("DownloadPiece for last piece failed: %v", err)
 	}
@@ -449,7 +443,6 @@ func TestDownloadPiece_SingleFileInfo(t *testing.T) {
 
 	client := NewWebSeedClient()
 	data, err := client.DownloadPiece(server.URL, info, 1)
-
 	if err != nil {
 		t.Fatalf("DownloadPiece failed: %v", err)
 	}

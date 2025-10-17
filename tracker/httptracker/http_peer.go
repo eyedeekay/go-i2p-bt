@@ -88,7 +88,7 @@ func (ps *Peers) UnmarshalBencode(b []byte) (err error) {
 // Supports both standard BitTorrent 6-byte format (BEP 23) and I2P 32-byte SHA-256 hash format.
 func (ps *Peers) unmarshalCompactPeers(data string) error {
 	_len := len(data)
-	
+
 	// I2P format: 32-byte SHA-256 hashes of Destinations
 	if _len%32 == 0 && _len > 0 {
 		peers := make(Peers, 0, _len/32)
@@ -101,7 +101,7 @@ func (ps *Peers) unmarshalCompactPeers(data string) error {
 		*ps = peers
 		return nil
 	}
-	
+
 	// Standard BitTorrent format: 6-byte entries (4-byte IP + 2-byte port)
 	if _len%6 == 0 {
 		peers := make(Peers, 0, _len/6)
@@ -116,7 +116,7 @@ func (ps *Peers) unmarshalCompactPeers(data string) error {
 		*ps = peers
 		return nil
 	}
-	
+
 	return metainfo.ErrInvalidAddr
 }
 

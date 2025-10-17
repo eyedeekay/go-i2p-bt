@@ -78,7 +78,7 @@ func (w *WebSeedClient) DownloadPiece(url string, info metainfo.Info, pieceIndex
 
 // DownloadBlock downloads a block (part of a piece) from a web seed URL.
 // Returns the block data or an error.
-func (w *WebSeedClient) DownloadBlock(url string, offset int64, length int64) ([]byte, error) {
+func (w *WebSeedClient) DownloadBlock(url string, offset, length int64) ([]byte, error) {
 	return w.DownloadRange(url, offset, length)
 }
 
