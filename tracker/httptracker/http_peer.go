@@ -84,26 +84,40 @@ func (ps *Peers) UnmarshalBencode(b []byte) (err error) {
 	}
 }
 
-// unmarshalCompactPeers processes compact peer format (BEP 23).
-// It parses 6-byte peer entries containing 4-byte IP and 2-byte port.
+// unmarshalCompactPeers processes compact peer format.
+// Supports both standard BitTorrent 6-byte format (BEP 23) and I2P 32-byte SHA-256 hash format.
 func (ps *Peers) unmarshalCompactPeers(data string) error {
 	_len := len(data)
-	if _len%6 != 0 {
-		return metainfo.ErrInvalidAddr
-	}
-
-	peers := make(Peers, 0, _len/6)
-	for i := 0; i < _len; i += 6 {
-		var addr metainfo.Address
-		addrBytes := []byte(data[i : i+6])
-		if err := addr.UnmarshalBinary(addrBytes); err != nil {
-			return err
+	
+	// I2P format: 32-byte SHA-256 hashes of Destinations
+	if _len%32 == 0 && _len > 0 {
+		peers := make(Peers, 0, _len/32)
+		for i := 0; i < _len; i += 32 {
+			hash := []byte(data[i : i+32])
+			// Convert 32-byte SHA-256 hash to Base32 .b32.i2p address
+			b32addr := strings.ToLower(strings.Replace(i2pB32enc.EncodeToString(hash), "=", "", -1)) + ".b32.i2p"
+			peers = append(peers, Peer{IP: b32addr, Port: 6881}) // Port ignored for I2P
 		}
-		peers = append(peers, Peer{IP: addr.IP.String(), Port: addr.Port})
+		*ps = peers
+		return nil
 	}
-
-	*ps = peers
-	return nil
+	
+	// Standard BitTorrent format: 6-byte entries (4-byte IP + 2-byte port)
+	if _len%6 == 0 {
+		peers := make(Peers, 0, _len/6)
+		for i := 0; i < _len; i += 6 {
+			var addr metainfo.Address
+			addrBytes := []byte(data[i : i+6])
+			if err := addr.UnmarshalBinary(addrBytes); err != nil {
+				return err
+			}
+			peers = append(peers, Peer{IP: addr.IP.String(), Port: addr.Port})
+		}
+		*ps = peers
+		return nil
+	}
+	
+	return metainfo.ErrInvalidAddr
 }
 
 // unmarshalDictPeers processes dictionary peer format (BEP 3).
